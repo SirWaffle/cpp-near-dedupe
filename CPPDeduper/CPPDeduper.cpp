@@ -16,9 +16,12 @@
 
 static constexpr int HASH_LENGTH_SHINGLES = 5; //5 words used per hash
 static constexpr int NUM_HASHES = 256; //number of hashes for comparison
-static constexpr int NUM_HASHER_THREADS = 8; //more threads crunch through mroe input faster
 static constexpr int MAX_RECORDS_LOADED = 4096 * 16; //the higher this is, the higher memory usage can get
 static constexpr int JACCARD_EARLY_OUT = 0.5; //speeds up the comparisons by early outting
+
+//thread counts
+static constexpr int NUM_HASHER_THREADS = 1; // 4; //more threads crunch through mroe input faster
+static constexpr int NUM_INTERNAL_COMPARE_THREADS = 12; //speeds up compares via multithreading
 
 //quick and sloppy lookups of filenames, so we dont have to store in each unit of data
 //saves # of laoded docs * string length of filepaths woth of memory
@@ -121,7 +124,7 @@ int main(int argc, const char** argv)
     //comparer
     std::list< ComparerThreadOutputData* > allComparedItems;
     LockableQueue< ComparerThreadOutputData* > duplicates;
-    ComparerThread comparerThread(true);
+    ComparerThread comparerThread(true, NUM_INTERNAL_COMPARE_THREADS);
     comparerThread.Start(&hashedDataQueue, &allComparedItems, &duplicates, 64, JACCARD_EARLY_OUT, matchThreash, NUM_HASHES);
 
     //and as the comparer spits out the dupes, we can start removing them from the datasets...
@@ -140,6 +143,8 @@ int main(int argc, const char** argv)
     for (int i = 0; i < NUM_HASHER_THREADS; ++i)
     {
         hasherThreads[i]->WaitForFinish();
+        delete hasherThreads[i];
+        hasherThreads[i] = nullptr;
     }
 
     //comparer now
