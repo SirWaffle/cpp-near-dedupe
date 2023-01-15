@@ -9,6 +9,9 @@
 * - command line params (more, better, etc)
 * - dont need to hang onto hashed data in the compare objects, just there for debugging ( RAM savings )
 * - write out deduped files to another location
+* 
+* - fix all the really slow stuff in duperesolver, easy perf gains
+* - fix structs passed between threads to use shared_ptr's
 */
 
 static constexpr int HASH_LENGTH_SHINGLES = 5; //5 words used per hash
@@ -123,7 +126,7 @@ int main(int argc, const char** argv)
 
     //and as the comparer spits out the dupes, we can start removing them from the datasets...
     //or something... not entirely sure how i want to handle this yet...
-    DupeResolverThread dupeResolverThread;
+    DupeResolverThread dupeResolverThread(basePath, output);
     dupeResolverThread.Start(&allComparedItems, &duplicates, &arrowLoaderThread, &fileNamesVector);
     
     //lets start a stats out thread so we dont get bored
@@ -154,4 +157,7 @@ int main(int argc, const char** argv)
     //aaaand done
     auto duration = duration_cast<std::chrono::microseconds>(stopTime - startTime);
     std::cout << "Finished in " << (uint64_t)(duration.count() / 1000) << "ms" << std::endl;
+    std::cout << "Found " << allComparedItems.size() << " Unique documents" << std::endl;
+    std::cout << "Found " << dupeResolverThread.TotalDupes() << " duplicates, and removed " << dupeResolverThread.TotalDupesRemoved() << std::endl;
+
 }
