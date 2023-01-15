@@ -117,7 +117,7 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
                         //for processing in the removal of dupes
                         duplicateItems->push(std::move(citem));
 
-                        if (citem->maxMatchedVal > dupeThreash)
+                        if (m_throwOutDupes && citem->maxMatchedVal > dupeThreash)
                         {
                             //dont add this back to the list of all docs, no need to store dupes
                             citem = nullptr;
