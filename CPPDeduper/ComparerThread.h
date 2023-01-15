@@ -67,12 +67,12 @@ protected:
         {
 #pragma message("figure out intrinsics on gcc")
 #ifndef __GNUC__
-            double match = JaccardTurbo(citem->myHashData->hashes.get(), numHashes,
-                (*it)->myHashData->hashes.get(), numHashes,
+            double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
+                (*it)->myHashData->hashes.get(), (*it)->myHashData->hashLen,
                 earlyOut);
 #else
-            double match = JaccardFast(citem->myHashData->hashes.get(), numHashes,
-                (*it)->myHashData->hashes.get(), numHashes,
+            double match = JaccardFast(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
+                (*it)->myHashData->hashes.get(), (*it)->myHashData->hashLen,
                 earlyOut);
 #endif
             if (match > maxMatchVal)
@@ -141,9 +141,6 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
             continue;
         }
 
-        //ConsoleLogDebug(std::format("compare hashes work items length {}, pending items {}\n", workQueue.size(), hashedDataQueue->Length()));
-
-        //TODO: PERF: split into multiple threads, compare against all existing, then after join, compare each against each other before adding to list of uniques
         while (workQueue.size() > 0)
         {
             //early out since no checks
@@ -199,8 +196,10 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
                 {
                     citem->maxMatchedVal = match;
 
+                    /*
                     std::cout << "found dupe: " << citem->myHashData->batchNum << ", " << citem->myHashData->docId << ", " << citem->myHashData->stringArrayInd << " of "
                         << dupeItem->myHashData->batchNum << ", " << dupeItem->myHashData->docId << ", " << dupeItem->myHashData->stringArrayInd << std::endl;
+                    */
 
                     //for processing in the removal of dupes
                     duplicateItems->push(std::move(citem));                        
@@ -239,12 +238,12 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
                 {
 #pragma message("figure out intrinsics on gcc")
 #ifndef __GNUC__
-                    double match = JaccardTurbo(citem->myHashData->hashes.get(), numHashes,
-                        (*it)->myHashData->hashes.get(), numHashes,
+                    double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
+                        (*it)->myHashData->hashes.get(), (*it)->myHashData->hashLen,
                         earlyOut);
 #else
-                    double match = JaccardFast(citem->myHashData->hashes.get(), numHashes,
-                        (*it)->myHashData->hashes.get(), numHashes,
+                    double match = JaccardFast(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
+                        (*it)->myHashData->hashes.get(), (*it)->myHashData->hashLen,
                         earlyOut);
 #endif
                     if (match > citem->maxMatchedVal)

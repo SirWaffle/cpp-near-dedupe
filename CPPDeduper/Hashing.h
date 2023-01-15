@@ -162,9 +162,9 @@ public:
                     //TODO: usually with hashing this is fine, perhaps something is off though, def. verify
                     // //UB optimization maybe? count is off in release mode
                     //warning C4333: '>>': right shift by too large amount, data loss
-                    //hashes[k] = hashes[k] ^ (c >> 16);
+                    hashes[k] = hashes[k] ^ (c >> 16);
 #pragma message("figure out hashing warning")
-                    hashes[k] = hashes[k] ^ (c << 16);
+                    //hashes[k] = hashes[k] ^ (c << 16);
 
                     hashes[k] = hashes[k] * 16777619;
                 }
@@ -252,17 +252,16 @@ private:
     HashTable htable_;
 };
 
-
-//faster if we use const values for ahshing
+//faster if we use const values for hshing
 template<int HASH_LEN_SHINGLES, int NUM_HASHES>
-void MakeFingerprint(const U16String& str, std::unique_ptr<uint32_t[]>* hashes)
+int MakeFingerprint(const U16String& str, std::unique_ptr<uint32_t[]>* hashes)
 {
     Pipe3Shingler<HASH_LEN_SHINGLES, NUM_HASHES> shingler;
     hashes->reset(new uint32_t[decltype(shingler)::kNumHashes]);
     uint32_t* ptr = hashes->get();
-    int len;
+    int len = 0;
     shingler.Process(str.data(), str.length(), ptr, &len);
-    ptr += len;
+    return len;
 }
 
 void CharPtrToUStr(const char* src, size_t srcLen, U16String& dst) {

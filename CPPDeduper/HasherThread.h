@@ -10,6 +10,7 @@ struct HasherThreadOutputData
     int64_t stringArrayInd;
     uint32_t batchNum;
     std::unique_ptr<uint32_t[]> hashes;
+    uint32_t hashLen;
 };
 
 
@@ -53,32 +54,27 @@ protected:
                     continue;
                 }
 
-                //ConsoleLogDebug(std::format("hashing recordbatch work items length {}, pending items {}\n", workQueue.size(), batchQueueIn->Length()));
-
                 while (workQueue.size() > 0)
                 {
                     //loop over the batchQueueIn, grab some items, hash em, stuff em in the hashedDataQueue
                     workItem = workQueue.front();
                     workQueue.pop();
 
-                    //TODO: this grabbing of the specific buffer ind seems suspect. verify
                     std::shared_ptr<arrow::Array> array = workItem->recordbatch->GetColumnByName(dataColumnName);
-                    //auto& arrowBuffers = (*(*array).data()).buffers;
-                    //auto& text = arrowBuffers[2];
 
                     arrow::StringArray stringArray(array->data());
                    
                     for (int64_t i = 0; i < stringArray.length(); ++i)
                     {
                         std::string_view view = stringArray.GetView(i);
-                        //std::cout << stringArray.GetString(i) << std::endl;
 
                         //hash...
                         U16String u16str;
-                        //ArrowBuffToUStr(text->data(), text->size(), u16str);
+
                         CharPtrToUStr(view.data(), view.size(), u16str);
+
                         std::unique_ptr<uint32_t[]> hashes;
-                        MakeFingerprint<HASH_LEN_SHINGLES, NUM_HASHES>(u16str, &hashes);
+                        uint32_t hashLen = MakeFingerprint<HASH_LEN_SHINGLES, NUM_HASHES>(u16str, &hashes);
 
                         //push into hashedQueue
                         HasherThreadOutputData* hashed = new HasherThreadOutputData();
@@ -86,6 +82,8 @@ protected:
                         hashed->stringArrayInd = i;
                         hashed->batchNum = workItem->batchNum;
                         hashed->hashes = std::move(hashes);
+                        hashed->hashLen = hashLen;
+
                         hashedDataQueue->push(std::move(hashed));
                     }
 

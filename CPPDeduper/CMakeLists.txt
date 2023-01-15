@@ -20,7 +20,7 @@ if ( CMAKE_COMPILER_IS_GNUCC )
     set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} -std=gnu++2a -Wall -Wextra -fsanitize=undefined -fno-sanitize-recover")
 endif()
 if ( MSVC )
-    set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} /W4 /WX /EHsc")
+    set(CMAKE_CXX_FLAGS  "${CMAKE_CXX_FLAGS} /W4 /EHsc") #/WX
 endif()
 
 ADD_CUSTOM_TARGET(debug

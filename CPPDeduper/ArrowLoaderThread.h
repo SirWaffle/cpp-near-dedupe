@@ -127,6 +127,8 @@ arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, ui
         }
     }
 
+    std::cout << "Closing file " << path_to_file << std::endl;
+
     arrow::Status status = ipc_reader->Close();
     status = input->Close();
     return arrow::Status::OK();
