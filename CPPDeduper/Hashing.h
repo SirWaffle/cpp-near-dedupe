@@ -54,7 +54,7 @@ public:
             empty_ = true;
             return;
         }
-        int pos = (v & kMask);
+        uint32_t pos = (v & kMask);
         for (size_t i = pos; i < kSize; i++) {
             if (data_[i] == kEmpty) {
                 data_[i] = v;
@@ -80,7 +80,7 @@ public:
         {
             return empty_;
         }
-        int pos = (v & kMask);
+        uint32_t pos = (v & kMask);
         for (size_t i = pos; i < kSize; i++) {
             if (data_[i] == v) {
                 return true;
@@ -203,7 +203,7 @@ public:
 
                 if (htable_.size() >= htable_.capacity() / 2) {
                     htable_.Clear();
-                    for (size_t j = 0; j < *fng_length; j++) {
+                    for (int j = 0; j < *fng_length; j++) {
                         htable_.InsertUnsafe(fng[j]);
                     }
                 }
@@ -266,18 +266,18 @@ void MakeFingerprint(const U16String& str, std::unique_ptr<uint32_t[]>* hashes)
 }
 
 void CharPtrToUStr(const char* src, size_t srcLen, U16String& dst) {
-    auto require = [&src, &srcLen](int offset, int count) -> void {
+    auto require = [&src, &srcLen](uint32_t offset, uint32_t count) -> void {
         if (offset + count > srcLen) {
             Die("String too short");
         }
-        for (int i = 0; i < count; i++) {
+        for (uint32_t i = 0; i < count; i++) {
             char c = src[offset + i];
             if ((c & 0xc0) != 0x80) {
                 Die("Illegal utf8 sequence");
             }
         }
     };
-    for (int i = 0; i < srcLen; ) {
+    for (uint32_t i = 0; i < srcLen; ) {
         uint8_t c = (uint8_t)src[i];
         if ((c & 0x80) == 0) {
             // 0xxxxxxx
@@ -309,7 +309,7 @@ void CharPtrToUStr(const char* src, size_t srcLen, U16String& dst) {
         }
     }
 }
-
+/*
 void ArrowBuffToUStr(const uint8_t* src, size_t srcLen, U16String& dst) {
     auto require = [&src, &srcLen](int offset, int count) -> void {
         if (offset + count > srcLen) {
@@ -400,5 +400,5 @@ void StrToUStr(const std::string& src, U16String& dst) {
             i++;
         }
     }
-}
+}*/
 

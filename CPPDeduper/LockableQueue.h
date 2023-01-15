@@ -46,7 +46,7 @@ public:
         return count;
     }
 
-    volatile int Length()
+    int Length()
     {
         return (int)queue.size();
     }

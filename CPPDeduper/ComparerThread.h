@@ -96,10 +96,10 @@ protected:
     bool m_throwOutDupes;
     std::thread* m_thread = nullptr;
     std::stop_source m_stopCompare;
-    int numberOfInternalThreads;
+    uint32_t numberOfInternalThreads;
 
 public:
-    ComparerThread(bool throwOutDupes, int interalThreads)
+    ComparerThread(bool throwOutDupes, uint32_t interalThreads)
         :m_throwOutDupes(throwOutDupes),
         numberOfInternalThreads(interalThreads)
     {
@@ -162,7 +162,7 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
             }
 
             //spread the work of comparing across threads..            
-            for (int i = 0; i < numberOfInternalThreads && workQueue.size() > 0; ++i)
+            for (size_t i = 0; i < numberOfInternalThreads && workQueue.size() > 0; ++i)
             {
                 workItem = workQueue.front();
                 workQueue.pop();
@@ -178,7 +178,7 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
             }
 
             //let them crunch and wait for all to finish
-            for (int i = 0; i < internalCompareThread.size(); ++i)
+            for (size_t i = 0; i < internalCompareThread.size(); ++i)
             {
                 if(internalCompareThread[i] != nullptr)
                     internalCompareThread[i]->WaitForFinish();
@@ -186,7 +186,7 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
 
             //run through each and look at result, if its a dupe, pass it to dupes, if its not, we need to compare all the
             std::list<ComparerThreadOutputData* > potenialKeepers;
-            for (int i = 0; i < internalCompareThread.size(); ++i)
+            for (size_t i = 0; i < internalCompareThread.size(); ++i)
             {
                 if (internalCompareThread[i] == nullptr)
                     continue;
@@ -218,7 +218,7 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
             }
 
             //delete threads for now TODO: PERF - reuse
-            for (int i = 0; i < internalCompareThread.size(); ++i)
+            for (size_t i = 0; i < internalCompareThread.size(); ++i)
             {
                 if (internalCompareThread[i] != nullptr)
                 {

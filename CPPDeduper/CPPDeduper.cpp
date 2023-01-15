@@ -21,7 +21,7 @@ static constexpr double JACCARD_EARLY_OUT = 0.5; //speeds up the comparisons by 
 
 //thread counts
 static constexpr int NUM_HASHER_THREADS = 1; // 4; //more threads crunch through mroe input faster
-static constexpr int NUM_INTERNAL_COMPARE_THREADS = 1; //speeds up compares via multithreading
+static constexpr uint32_t NUM_INTERNAL_COMPARE_THREADS = 1; //speeds up compares via multithreading
 
 //quick and sloppy lookups of filenames, so we dont have to store in each unit of data
 //saves # of laoded docs * string length of filepaths woth of memory
