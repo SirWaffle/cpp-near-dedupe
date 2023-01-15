@@ -83,7 +83,6 @@ protected:
         //===================
         //open file for read
         //====================
-        arrow::MemoryPool* pool = arrow::default_memory_pool();
         std::shared_ptr<arrow::io::RandomAccessFile> input;
         ARROW_ASSIGN_OR_RAISE(input, arrow::io::MemoryMappedFile::Open(sourcePath, arrow::io::FileMode::READ));
         ARROW_ASSIGN_OR_RAISE(auto ipc_reader, arrow::ipc::RecordBatchStreamReader::Open(input));   
@@ -97,8 +96,9 @@ protected:
         ARROW_ASSIGN_OR_RAISE(auto batch_writer, arrow::ipc::MakeStreamWriter(output_file.get(), schema, options));
 
         return arrow::Status::OK();
+        /*
         //read
-        int batchCount = 0;
+        uint32_t batchCount = 0;
         std::shared_ptr<arrow::RecordBatch> record_batch;
         while (ipc_reader->ReadNext(&record_batch) == arrow::Status::OK() && record_batch != NULL)
         {
@@ -131,7 +131,7 @@ protected:
 
         ARROW_RETURN_NOT_OK(output_file->Close());
 
-        return arrow::Status::OK();
+        return arrow::Status::OK();*/
     }
 
 
@@ -140,6 +140,9 @@ protected:
         ArrowLoaderThread* arrowLoaderThread,
         std::vector<std::string>* fileNamesVector)
     {
+        (void*)arrowLoaderThread;
+        (void*)allComparedItems;
+
         std::queue<ComparerThreadOutputData* > workQueue;
         ComparerThreadOutputData* workItem;
 
@@ -150,10 +153,9 @@ protected:
         while (!stop.stop_requested() || duplicates->Length() > 0)
         {
             //snooze
-            std::this_thread::sleep_for(10ms);
             if (duplicates->try_pop_range(&workQueue, 64, 1ms) == 0)
             {
-                std::this_thread::sleep_for(200ms);
+                std::this_thread::sleep_for(50ms);
                 continue;
             }
 
@@ -179,10 +181,9 @@ protected:
         //we can be super safe and handle removing the dupes after we have finished processing them all...
         //not as fast, but safe. do this for now, then improve it later
         //TODO: perf improvement
-        int count = 0;
         for (auto it = fileIdToDuplicate.begin(); it != fileIdToDuplicate.end(); it++)
         {
-            totalDuplicates += (*it).second.size();
+            totalDuplicates += (uint32_t)(*it).second.size();
 
             std::string fname = (*fileNamesVector)[(*it).first];
             std::cout << "DocId: " << (*it).first << "  Count: " << (*it).second.size() << "  Dataset path: " << fname << std::endl;
@@ -224,7 +225,7 @@ protected:
             //TODO: perf
             (*it).second.sort(compare_batchNums);
 
-            CopyFileSansDupes(fname, outPath.string(), (*it).second);
+            arrow::Status ret = CopyFileSansDupes(fname, outPath.string(), (*it).second);
         }
         
     }

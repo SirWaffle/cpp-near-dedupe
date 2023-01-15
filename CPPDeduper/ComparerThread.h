@@ -24,6 +24,7 @@ protected:
     std::stop_source m_stopCompare;
     double maxMatchVal = 0.0;
     ComparerThreadOutputData* item = nullptr;
+    ComparerThreadOutputData* dupeItem = nullptr;
 
 public:
     InternalComparerThread()
@@ -52,6 +53,11 @@ public:
         return item;
     }
 
+    ComparerThreadOutputData* GetDupeItem()
+    {
+        return dupeItem;
+    }
+
 protected:
     void EnterProcFunc(std::stop_source stop, std::list< ComparerThreadOutputData* >* allComparedItems, double earlyOut, double dupeThreash, int numHashes, ComparerThreadOutputData* citem)
     {
@@ -72,8 +78,9 @@ protected:
             if (match > maxMatchVal)
             {
                 maxMatchVal = match;
+                dupeItem = (*it);
 
-                if (citem->maxMatchedVal > dupeThreash)
+                if (citem->maxMatchedVal >= dupeThreash)
                 {
                     //we are done
                     return;
@@ -100,7 +107,7 @@ public:
 
     void Start(LockableQueue< HasherThreadOutputData* >* hashedDataQueue, std::list< ComparerThreadOutputData* >* allComparedItems, LockableQueue< ComparerThreadOutputData* >* duplicateItems, int chunkSize, double earlyOut, double dupeThreash, int numHashes)
     {
-        m_thread = new std::thread(&ComparerThread::EnterProcFunc, this, m_stopCompare, hashedDataQueue, allComparedItems, duplicateItems, 64, earlyOut, dupeThreash, numHashes);
+        m_thread = new std::thread(&ComparerThread::EnterProcFunc, this, m_stopCompare, hashedDataQueue, allComparedItems, duplicateItems, chunkSize, earlyOut, dupeThreash, numHashes);
     }
 
     void WaitForFinish()
@@ -120,6 +127,7 @@ protected:
 void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherThreadOutputData* >* hashedDataQueue, std::list< ComparerThreadOutputData* >* allComparedItems, LockableQueue< ComparerThreadOutputData* >* duplicateItems, int chunkSize, double earlyOut, double dupeThreash, int numHashes)
 {
     std::vector< InternalComparerThread* > internalCompareThread(numberOfInternalThreads, nullptr);
+    chunkSize = chunkSize; //do nothing, unreferenced param warning
 
     //this guy needs to compare each incoming hashed data against all prexisting data, gonna be slow.
     std::queue<HasherThreadOutputData* > workQueue;
@@ -185,21 +193,22 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
 
                 double match = internalCompareThread[i]->GetMaxMatchVal();
                 ComparerThreadOutputData* citem = internalCompareThread[i]->GetComparerItem();
+                ComparerThreadOutputData* dupeItem = internalCompareThread[i]->GetDupeItem();
 
                 if (match >= dupeThreash)
                 {
                     citem->maxMatchedVal = match;
 
-                    if (citem->maxMatchedVal > dupeThreash)
-                    {
-                        //for processing in the removal of dupes
-                        duplicateItems->push(std::move(citem));
+                    std::cout << "found dupe: " << citem->myHashData->batchNum << ", " << citem->myHashData->docId << ", " << citem->myHashData->stringArrayInd << " of "
+                        << dupeItem->myHashData->batchNum << ", " << dupeItem->myHashData->docId << ", " << dupeItem->myHashData->stringArrayInd << std::endl;
 
-                        if (m_throwOutDupes)
-                        {
-                            //dont add this back to the list of all docs, no need to store dupes
-                            citem = nullptr;
-                        }
+                    //for processing in the removal of dupes
+                    duplicateItems->push(std::move(citem));                        
+
+                    if (m_throwOutDupes)
+                    {
+                        //dont add this back to the list of all docs, no need to store dupes
+                        citem = nullptr;
                     }
                 }
 

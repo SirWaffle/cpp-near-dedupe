@@ -17,11 +17,11 @@
 static constexpr int HASH_LENGTH_SHINGLES = 5; //5 words used per hash
 static constexpr int NUM_HASHES = 256; //number of hashes for comparison
 static constexpr int MAX_RECORDS_LOADED = 4096 * 16; //the higher this is, the higher memory usage can get
-static constexpr int JACCARD_EARLY_OUT = 0.5; //speeds up the comparisons by early outting
+static constexpr double JACCARD_EARLY_OUT = 0.5; //speeds up the comparisons by early outting
 
 //thread counts
 static constexpr int NUM_HASHER_THREADS = 1; // 4; //more threads crunch through mroe input faster
-static constexpr int NUM_INTERNAL_COMPARE_THREADS = 12; //speeds up compares via multithreading
+static constexpr int NUM_INTERNAL_COMPARE_THREADS = 1; //speeds up compares via multithreading
 
 //quick and sloppy lookups of filenames, so we dont have to store in each unit of data
 //saves # of laoded docs * string length of filepaths woth of memory
@@ -32,6 +32,11 @@ static std::vector<std::string> fileNamesVector;
 //no tbothering with thread saftey or anything, its all reads so w/e
 static void StatsOutputThread_func(std::stop_source* threadstop, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, LockableQueue< HasherThreadOutputData* >* hashedDataQueue, std::list< ComparerThreadOutputData* >* allComparedItems)
 {
+    (void*)threadstop;
+    (void*)allComparedItems;
+    (void*)hashedDataQueue;
+    (void*)batchQueue;
+    /*
     auto startStats = std::chrono::high_resolution_clock::now();
     while (!threadstop->stop_requested())
     {
@@ -43,7 +48,7 @@ static void StatsOutputThread_func(std::stop_source* threadstop, LockableQueue< 
             << "   Awaiting Jaccard: " << hashedDataQueue->Length()
             << "   Awaiting output: " << allComparedItems->size()
             << std::endl;
-    }
+    }*/
 }
 
 

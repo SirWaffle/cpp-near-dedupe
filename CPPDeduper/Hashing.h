@@ -115,7 +115,7 @@ private:
     const uint32_t kMask;
 
     uint32_t size_;
-    std::vector<int32_t> data_;
+    std::vector<uint32_t> data_;
     bool empty_; // contains kEmpty as element
 };
 
@@ -150,8 +150,8 @@ public:
             }
         };
 
-#pragma warning( push )
-#pragma warning( disable : 4333)
+//#pragma warning( push )
+//#pragma warning( disable : 4333)
         auto ReadWord = [&]() {
             while (i < txt_length && IsAlphanum(txt[i])) {
                 uint16_t c = txt[i];
@@ -160,15 +160,18 @@ public:
                     hashes[k] = hashes[k] * 16777619;
 
                     //TODO: usually with hashing this is fine, perhaps something is off though, def. verify
+                    // //UB optimization maybe? count is off in release mode
                     //warning C4333: '>>': right shift by too large amount, data loss
-                    hashes[k] = hashes[k] ^ (c >> 16);
+                    //hashes[k] = hashes[k] ^ (c >> 16);
+#pragma message("figure out hashing warning")
+                    hashes[k] = hashes[k] ^ (c << 16);
 
                     hashes[k] = hashes[k] * 16777619;
                 }
                 i++;
             }
         };
-#pragma warning( pop ) 
+//#pragma warning( pop ) 
 
         auto ShiftPipeline = [&]() {
             for (int k = 0; k < K - 1; k++) {
@@ -200,8 +203,8 @@ public:
 
                 if (htable_.size() >= htable_.capacity() / 2) {
                     htable_.Clear();
-                    for (size_t i = 0; i < *fng_length; i++) {
-                        htable_.InsertUnsafe(fng[i]);
+                    for (size_t j = 0; j < *fng_length; j++) {
+                        htable_.InsertUnsafe(fng[j]);
                     }
                 }
             }
@@ -231,8 +234,8 @@ public:
 
                     if (htable_.size() >= htable_.capacity() / 2) {
                         htable_.Clear();
-                        for (size_t i = 0; i < N; i++) {
-                            htable_.InsertUnsafe(fng[i]);
+                        for (size_t j = 0; j < N; j++) {
+                            htable_.InsertUnsafe(fng[j]);
                         }
                     }
                 }

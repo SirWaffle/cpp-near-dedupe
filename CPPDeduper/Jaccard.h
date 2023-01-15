@@ -12,7 +12,7 @@
 
 #include "isalphanum.h"
 
-double JaccardClassical(const uint32_t* fng1, int len1, const uint32_t* fng2, int len2, double alpha)
+double JaccardClassical(const uint32_t* fng1, int len1, const uint32_t* fng2, int len2, double )
 {
     int pos1 = 0;
     int pos2 = 0;

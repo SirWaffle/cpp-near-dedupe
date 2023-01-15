@@ -35,7 +35,7 @@ protected:
     uint32_t fileIndex = 0;
 
     uint32_t totalbatches = 0;
-    uint32_t totaldocs = 0;
+    uint64_t totaldocs = 0;
 
 public:
     ArrowLoaderThread()
@@ -64,7 +64,7 @@ public:
         return totalbatches;
     }
 
-    uint32_t GetTotalDocs()
+    uint64_t GetTotalDocs()
     {
         return totaldocs;
     }
@@ -88,10 +88,9 @@ protected:
 //=====
 // arrow file streamer
 //=====
-arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, int maxCapacity)
+arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, uint32_t curfileInd, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, int maxCapacity)
 {
     //open file
-    arrow::MemoryPool* pool = arrow::default_memory_pool();
     std::shared_ptr<arrow::io::RandomAccessFile> input;
     ARROW_ASSIGN_OR_RAISE(input, arrow::io::MemoryMappedFile::Open(path_to_file, arrow::io::FileMode::READ));
     ARROW_ASSIGN_OR_RAISE(auto ipc_reader, arrow::ipc::RecordBatchStreamReader::Open(input));
@@ -115,7 +114,7 @@ arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, ui
                 std::shared_ptr<arrow::Schema> schema = ipc_reader->schema();
 
                 ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData();
-                data->docId = fileIndex;
+                data->docId = curfileInd;
                 data->batchNum = batchNum++;
                 data->recordbatch = std::move(batch);
 

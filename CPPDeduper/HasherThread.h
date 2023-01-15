@@ -7,7 +7,7 @@
 struct HasherThreadOutputData
 {
     uint32_t docId;
-    uint32_t stringArrayInd;
+    int64_t stringArrayInd;
     uint32_t batchNum;
     std::unique_ptr<uint32_t[]> hashes;
 };
@@ -68,7 +68,7 @@ protected:
 
                     arrow::StringArray stringArray(array->data());
                    
-                    for (uint64_t i = 0; i < stringArray.length(); ++i)
+                    for (int64_t i = 0; i < stringArray.length(); ++i)
                     {
                         std::string_view view = stringArray.GetView(i);
                         //std::cout << stringArray.GetString(i) << std::endl;
