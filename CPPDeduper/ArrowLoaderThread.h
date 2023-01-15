@@ -32,6 +32,7 @@ class ArrowLoaderThread
 {
 protected:
     std::thread* m_thread = nullptr;
+    uint32_t fileIndex = 0;
 
 public:
     ArrowLoaderThread()
@@ -48,10 +49,17 @@ public:
         m_thread->join();
     }
 
+    //returns the index of the file vector of the file we are processing
+    //this is used by the write out thread, to know which files are safe to start operating on
+    int GetCurrentlyProcessingFileID()
+    {
+        return fileIndex;
+    }
+
 protected:
     void EnterProcFunc(std::vector<std::string> paths_to_file, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, int maxCapacity)
     {
-        for(uint32_t fileIndex = 0; fileIndex < paths_to_file.size(); ++fileIndex)
+        for(fileIndex = 0; fileIndex < paths_to_file.size(); ++fileIndex)
         {
             std::string& path_to_file = paths_to_file[fileIndex];
 
