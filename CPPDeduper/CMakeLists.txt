@@ -10,10 +10,21 @@ list(APPEND CMAKE_PREFIX_PATH "/usr/lib/x86_64-linux-gnu/cmake")
 list(APPEND CMAKE_PREFIX_PATH "/usr/lib/x86_64-linux-gnu/cmake/Snappy")
 find_package(Arrow REQUIRED)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_VERBOSE_MAKEFILE 1)
 
-set(CMAKE_CXX_FLAGS_DEBUG "-std=gnu++2a")
+set(CMAKE_CXX_STANDARD C++20)
 set(CMAKE_CXX_FLAGS "-std=gnu++2a") 
+
+ADD_CUSTOM_TARGET(debug
+  COMMAND ${CMAKE_COMMAND} -DCMAKE_BUILD_TYPE=Debug ${CMAKE_SOURCE_DIR}
+  COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target all
+  COMMENT "Creating the executable in the debug mode.")
+
+ADD_CUSTOM_TARGET(release
+  COMMAND ${CMAKE_COMMAND} -DCMAKE_BUILD_TYPE=Release ${CMAKE_SOURCE_DIR}
+  COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target all
+  COMMENT "Creating the executable in the release mode.")
+
 
 # Add source to this project's executable.
 # Local header files here ONLY

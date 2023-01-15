@@ -46,19 +46,7 @@ protected:
             while (!stop.stop_requested() || batchQueueIn->Length() > 0)
             {
                 std::this_thread::sleep_for(1ms);
-                for (int i = 0; i < chunkSize; ++i)
-                {
-                    if (batchQueueIn->try_pop(&workItem, 1ms))
-                    {
-                        workQueue.push(workItem);
-                    }
-                    else
-                    {
-                        break;
-                    }
-                }
-
-                if (workQueue.size() == 0)
+                if (batchQueueIn->try_pop_range(&workQueue, chunkSize, 1ms) == 0)
                 {
                     std::this_thread::sleep_for(100ms);
                     continue;

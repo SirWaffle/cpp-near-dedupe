@@ -77,7 +77,7 @@ arrow::Status StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, L
     while (true)
     {
         std::shared_ptr<arrow::RecordBatch> batch;
-        if (batchQueue->Length() >= 256)
+        if (batchQueue->Length() >= maxCapacity)
         {
             std::this_thread::sleep_for(5s);
         }
