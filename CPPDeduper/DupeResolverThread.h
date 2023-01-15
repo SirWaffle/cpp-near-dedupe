@@ -96,12 +96,14 @@ protected:
         std::shared_ptr<arrow::Schema> schema = ipc_reader->schema();
         ARROW_ASSIGN_OR_RAISE(auto batch_writer, arrow::ipc::MakeStreamWriter(output_file.get(), schema, options));
 
-      
+        return arrow::Status::OK();
         //read
         int batchCount = 0;
         std::shared_ptr<arrow::RecordBatch> record_batch;
         while (ipc_reader->ReadNext(&record_batch) == arrow::Status::OK() && record_batch != NULL)
         {
+            //will need to ahndle having to remove ROWS // or rebuilding the batch without the dupes
+            //TODO:
             if(sortedDupes.size() > 0 && sortedDupes.front()->maxMatchedData->batchNum == batchCount)
             {
                 //TODO: use the hashing to determin if the fingerprints are the same to be extra careful and verify

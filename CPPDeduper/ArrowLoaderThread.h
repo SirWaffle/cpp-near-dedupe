@@ -34,6 +34,9 @@ protected:
     std::thread* m_thread = nullptr;
     uint32_t fileIndex = 0;
 
+    uint32_t totalbatches = 0;
+    uint32_t totaldocs = 0;
+
 public:
     ArrowLoaderThread()
     {
@@ -56,6 +59,16 @@ public:
         return fileIndex;
     }
 
+    uint32_t GetTotalBatches()
+    {
+        return totalbatches;
+    }
+
+    uint32_t GetTotalDocs()
+    {
+        return totaldocs;
+    }
+
 protected:
     void EnterProcFunc(std::vector<std::string> paths_to_file, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, int maxCapacity)
     {
@@ -67,12 +80,15 @@ protected:
             arrow::Status status = StreamArrowDataset(path_to_file, fileIndex, batchQueue, maxCapacity);
         }
     }
+
+    arrow::Status StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, int maxCapacity);
 };
+
 
 //=====
 // arrow file streamer
 //=====
-arrow::Status StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, int maxCapacity)
+arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, int maxCapacity)
 {
     //open file
     arrow::MemoryPool* pool = arrow::default_memory_pool();
@@ -93,10 +109,16 @@ arrow::Status StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, L
         {
             if (ipc_reader->ReadNext(&batch) == arrow::Status::OK() && batch != NULL)
             {
+                ++totalbatches;
+                totaldocs += batch->num_rows();
+
+                std::shared_ptr<arrow::Schema> schema = ipc_reader->schema();
+
                 ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData();
                 data->docId = fileIndex;
                 data->batchNum = batchNum++;
                 data->recordbatch = std::move(batch);
+
                 batchQueue->push(std::move(data));
             }
             else

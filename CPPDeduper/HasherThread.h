@@ -7,6 +7,7 @@
 struct HasherThreadOutputData
 {
     uint32_t docId;
+    uint32_t stringArrayInd;
     uint32_t batchNum;
     std::unique_ptr<uint32_t[]> hashes;
 };
@@ -62,21 +63,31 @@ protected:
 
                     //TODO: this grabbing of the specific buffer ind seems suspect. verify
                     std::shared_ptr<arrow::Array> array = workItem->recordbatch->GetColumnByName(dataColumnName);
-                    auto& arrowBuffers = (*(*array).data()).buffers;
-                    auto& text = arrowBuffers[2];
+                    //auto& arrowBuffers = (*(*array).data()).buffers;
+                    //auto& text = arrowBuffers[2];
 
-                    //hash...
-                    U16String u16str;
-                    ArrowBuffToUStr(text->data(), text->size(), u16str);
-                    std::unique_ptr<uint32_t[]> hashes;
-                    MakeFingerprint<HASH_LEN_SHINGLES, NUM_HASHES>(u16str, &hashes);
+                    arrow::StringArray stringArray(array->data());
+                   
+                    for (uint64_t i = 0; i < stringArray.length(); ++i)
+                    {
+                        std::string_view view = stringArray.GetView(i);
+                        //std::cout << stringArray.GetString(i) << std::endl;
 
-                    //push into hashedQueue
-                    HasherThreadOutputData* hashed = new HasherThreadOutputData();
-                    hashed->docId = workItem->docId;
-                    hashed->batchNum = workItem->batchNum;
-                    hashed->hashes = std::move(hashes);
-                    hashedDataQueue->push(std::move(hashed));
+                        //hash...
+                        U16String u16str;
+                        //ArrowBuffToUStr(text->data(), text->size(), u16str);
+                        CharPtrToUStr(view.data(), view.size(), u16str);
+                        std::unique_ptr<uint32_t[]> hashes;
+                        MakeFingerprint<HASH_LEN_SHINGLES, NUM_HASHES>(u16str, &hashes);
+
+                        //push into hashedQueue
+                        HasherThreadOutputData* hashed = new HasherThreadOutputData();
+                        hashed->docId = workItem->docId;
+                        hashed->stringArrayInd = i;
+                        hashed->batchNum = workItem->batchNum;
+                        hashed->hashes = std::move(hashes);
+                        hashedDataQueue->push(std::move(hashed));
+                    }
 
                     delete workItem;
                 }

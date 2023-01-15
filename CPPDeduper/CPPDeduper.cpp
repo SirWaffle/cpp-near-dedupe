@@ -159,5 +159,6 @@ int main(int argc, const char** argv)
     std::cout << "Finished in " << (uint64_t)(duration.count() / 1000) << "ms" << std::endl;
     std::cout << "Found " << allComparedItems.size() << " Unique documents" << std::endl;
     std::cout << "Found " << dupeResolverThread.TotalDupes() << " duplicates, and removed " << dupeResolverThread.TotalDupesRemoved() << std::endl;
+    std::cout << "Total batches: " << arrowLoaderThread.GetTotalBatches() << " and total docs: " << arrowLoaderThread.GetTotalDocs() << std::endl;
 
 }
