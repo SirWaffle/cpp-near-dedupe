@@ -28,9 +28,9 @@ public:
     {
     }
 
-    void Start(LockableQueue< HasherThreadOutputData* >* hashedDataQueue, std::list< ComparerThreadOutputData* >* allComparedItems, int chunkSize, double earlyOut, double dupeThreash, int numHashes)
+    void Start(LockableQueue< HasherThreadOutputData* >* hashedDataQueue, std::list< ComparerThreadOutputData* >* allComparedItems, LockableQueue< ComparerThreadOutputData* >* duplicateItems, int chunkSize, double earlyOut, double dupeThreash, int numHashes)
     {
-        m_thread = new std::thread(&ComparerThread::EnterProcFunc, this, m_stopCompare, hashedDataQueue, allComparedItems, 64, earlyOut, dupeThreash, numHashes);
+        m_thread = new std::thread(&ComparerThread::EnterProcFunc, this, m_stopCompare, hashedDataQueue, allComparedItems, duplicateItems, 64, earlyOut, dupeThreash, numHashes);
     }
 
     void WaitForFinish()
@@ -41,11 +41,13 @@ public:
 
 protected:
     void EnterProcFunc(std::stop_source stop, LockableQueue< HasherThreadOutputData* >* hashedDataQueue,
-        std::list< ComparerThreadOutputData* >* allComparedItems, int chunkSize,
+        std::list< ComparerThreadOutputData* >* allComparedItems, 
+        LockableQueue< ComparerThreadOutputData* >* duplicateItems, 
+        int chunkSize,
         double earlyOut, double dupeThreash, int numHashes);
 };
 
-void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherThreadOutputData* >* hashedDataQueue, std::list< ComparerThreadOutputData* >* allComparedItems, int chunkSize, double earlyOut, double dupeThreash, int numHashes)
+void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherThreadOutputData* >* hashedDataQueue, std::list< ComparerThreadOutputData* >* allComparedItems, LockableQueue< ComparerThreadOutputData* >* duplicateItems, int chunkSize, double earlyOut, double dupeThreash, int numHashes)
 {
     //this guy needs to compare each incoming hashed data against all prexisting data, gonna be slow.
     std::queue<HasherThreadOutputData* > workQueue;
@@ -95,6 +97,7 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
             //this wilkl prioritize removing later documents that match, not the first one
             for (auto it = allComparedItems->begin(); it != allComparedItems->end() && citem->maxMatchedVal < dupeThreash; it++)
             {
+#pragma message("figure out intrinsics on gcc")
 #ifndef __GNUC__
                 double match = JaccardTurbo(citem->myHashData->hashes.get(), numHashes,
                     (*it)->myHashData->hashes.get(), numHashes,
@@ -109,13 +112,19 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
                     citem->maxMatchedVal = match;
                     citem->maxMatchedData = (*it)->myHashData;
 
-                    if (m_throwOutDupes && citem->maxMatchedVal > dupeThreash)
+                    if (citem->maxMatchedVal > dupeThreash)
                     {
-                        delete citem->myHashData;
-                        delete citem;
-                        citem = nullptr;
-                        break;
+                        //for processing in the removal of dupes
+                        duplicateItems->push(std::move(citem));
+
+                        if (citem->maxMatchedVal > dupeThreash)
+                        {
+                            //dont add this back to the list of all docs, no need to store dupes
+                            citem = nullptr;
+                            break;
+                        }
                     }
+
                 }
             }
 

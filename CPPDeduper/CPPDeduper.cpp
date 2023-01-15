@@ -6,8 +6,7 @@
 
 /*
 * TODO:
-* - command line params
-* - can squash filename to a lookup table to reduce instances of filename strings in memory (RAM savings )
+* - command line params (more, better, etc)
 * - dont need to hang onto hashed data in the compare objects, just there for debugging ( RAM savings )
 * - write out deduped files to another location
 */
@@ -16,12 +15,15 @@ static constexpr int HASH_LENGTH_SHINGLES = 5; //5 words used per hash
 static constexpr int NUM_HASHES = 256; //number of hashes for comparison
 static constexpr int NUM_HASHER_THREADS = 8; //more threads crunch through mroe input faster
 static constexpr int MAX_RECORDS_LOADED = 4096 * 16; //the higher this is, the higher memory usage can get
+static constexpr int JACCARD_EARLY_OUT = 0.5; //speeds up the comparisons by early outting
 
 //quick and sloppy lookups of filenames, so we dont have to store in each unit of data
+//saves # of laoded docs * string length of filepaths woth of memory
 static std::vector<std::string> fileNamesVector;
 
 
-
+//some stats to watch as the thing crunches. values are questionable since im
+//no tbothering with thread saftey or anything, its all reads so w/e
 static void StatsOutputThread_func(std::stop_source* threadstop, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, LockableQueue< HasherThreadOutputData* >* hashedDataQueue, std::list< ComparerThreadOutputData* >* allComparedItems)
 {
     auto startStats = std::chrono::high_resolution_clock::now();
@@ -43,7 +45,6 @@ static void StatsOutputThread_func(std::stop_source* threadstop, LockableQueue< 
 //==========
 // main
 //==========
-//dedpue "path to dir" ".arrow" 
 int main(int argc, const char** argv)
 {
     if (argc < 6)
@@ -63,12 +64,6 @@ int main(int argc, const char** argv)
 
     std::string output = argv[5];
 
-    //hard coded stuff for testing
-    //std::string dataColumnName = "text";
-    double jaccardEarlyOut = 0.5; //speed up
-    //double matchThresh = 0.7f; //Minhash threshold for match
-    //std::string output = "d:/testOutput-dedup/"; //not sure
-    //basePath = "D:\\carp\\pile-v2-eda\\local_dedup";
 
     std::cout << "Running with params: " << basePath << ", " << extension << ", " << dataColumnName << ", " << matchThreash << ", " << output << std::endl;
     std::cout << "Scanning for " << extension << " files in " << basePath;
@@ -122,28 +117,32 @@ int main(int argc, const char** argv)
 
     //comparer
     std::list< ComparerThreadOutputData* > allComparedItems;
+    LockableQueue< ComparerThreadOutputData* > duplicates;
     ComparerThread comparerThread(true);
-    comparerThread.Start(&hashedDataQueue, &allComparedItems, 64, jaccardEarlyOut, matchThreash, NUM_HASHES);
+    comparerThread.Start(&hashedDataQueue, &allComparedItems, &duplicates, 64, JACCARD_EARLY_OUT, matchThreash, NUM_HASHES);
 
+    //and as the comparer spits out the dupes, we can start removing them from the datasets...
+    //or something... not entirely sure how i want to handle this yet...
+    DupeResolverThread dupeResolverThread;
+    dupeResolverThread.Start(&allComparedItems, &duplicates, &arrowLoaderThread, &fileNamesVector);
+    
     //lets start a stats out thread so we dont get bored
     std::stop_source statThreadStopper;
     std::thread statsThread(StatsOutputThread_func, &statThreadStopper, &batchQueue, &hashedDataQueue, &allComparedItems);
 
-    //run everything until the reader thread finishes
+    //reader thread is first to finish in this pipeline
     arrowLoaderThread.WaitForFinish();
 
-    //now set the stop for the hasher, it will quit when the stop flag is on and the queue is empty of work
+    //hashers are next to finish
     for (int i = 0; i < NUM_HASHER_THREADS; ++i)
     {
         hasherThreads[i]->WaitForFinish();
     }
 
-    //now that all the work has gone to the writer, request it to exit, and wait till its done
+    //comparer now
     comparerThread.WaitForFinish();
 
-    //write out scores / dupes 
-    DupeResolverThread dupeResolverThread;
-    dupeResolverThread.Start(&allComparedItems);
+    //and the final peice, writting out the new datasets
     dupeResolverThread.WaitForFinish();
 
 
