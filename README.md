@@ -13,6 +13,10 @@ this project was thrown together in a few days, so more improvements will come
 - thread affinities / priority tweaking
 - handle different CPU intrinsics for more hardware support
 - unit tests
+- file write permissions on output folder
+- clearing output folder on run
+- allowing to operate inplace on a dataset
+- allow continuing from a partially crunched set of data
 
 # building
 - windows
@@ -20,6 +24,14 @@ this project was thrown together in a few days, so more improvements will come
 ```
 visual studio:
 open the sln (for sln based ) or the folder with the cmakelists.txt file (for cmake based)
+```
+
+- WSL ( tested on ubuntu )
+due to accessing windows drives, i had to sudo every command to avoid errors:
+```
+Cmake:
+sudo cmake .
+sudo make release
 ```
 
 - linux ( tested on ubuntu )
@@ -36,3 +48,6 @@ make release
 ```
 executing the program with no cmd args will display the expected cmd args
 ```
+
+# bugs and issues
+- need to manually clear the output folder / make sure its empty / ensure you have permissions, otherwise std::filesystem:: throws an exception and it fails at the end of crunching.
