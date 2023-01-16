@@ -261,7 +261,7 @@ protected:
             if (batch_writer->WriteRecordBatch(*writeBatch) != arrow::Status::OK())
             {
                 //TODO:: ERROR
-                std::cout << "OH SNAP 2!" << std::endl;
+                std::cout << "OH SNAP! FAILED TO WRITE SOMETHING!" << std::endl;
             }
    
             rowsWritten += writeBatch->num_rows();
@@ -270,12 +270,24 @@ protected:
 #endif
         }
 
-        std::cout << "   write complete, out of " << rowsLoaded << ", " << rowsWritten << " were written, and there were " << duplicateCount << " duplicates" << std::endl;
+        auto writeStats = batch_writer->stats();
+
+        std::cout << "   write complete, out of " << rowsLoaded << ", " << rowsWritten << " were written. THere were " << duplicateCount << " duplicates" << std::endl;
+        std::cout << "   reported written by stats: " << writeStats.num_record_batches << " written batches. " << std::endl;
+        
         //close stuff
-        arrow::Status status = ipc_reader->Close();
+        //TODO; need to do error checking
+        arrow::Status status = batch_writer->Close();
+        status = output_file->Close();
+
+        status = ipc_reader->Close();
         status = input->Close();
 
-        ARROW_RETURN_NOT_OK(output_file->Close());
+        //delete it if we wrote nothing...
+        if (rowsWritten == 0)
+        {
+            std::filesystem::remove(outPath);
+        }
 
         return arrow::Status::OK();
     }
