@@ -50,9 +50,9 @@ public:
     {
     }
 
-    void Start(std::vector<std::string> paths_to_file, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, int maxCapacity)
+    void Start(std::vector<std::string> paths_to_file, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, int maxCapacity, std::string dataColumnName)
     {
-        m_thread = new std::thread(&ArrowLoaderThread::EnterProcFunc, this, paths_to_file, batchQueue, maxCapacity);
+        m_thread = new std::thread(&ArrowLoaderThread::EnterProcFunc, this, paths_to_file, batchQueue, maxCapacity, dataColumnName);
     }
 
     void WaitForFinish()
@@ -78,25 +78,27 @@ public:
     }
 
 protected:
-    void EnterProcFunc(std::vector<std::string> paths_to_file, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, int maxCapacity)
+    void EnterProcFunc(std::vector<std::string> paths_to_file, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, int maxCapacity, std::string dataColumnName)
     {
         for(fileIndex = 0; fileIndex < paths_to_file.size(); ++fileIndex)
         {
             std::string& path_to_file = paths_to_file[fileIndex];
 
             std::cout << "Streaming in from file " << path_to_file  << ", files remaining " << (paths_to_file.size() - fileIndex) << "\n";
-            arrow::Status status = StreamArrowDataset(path_to_file, fileIndex, batchQueue, maxCapacity);
+            arrow::Status status = StreamArrowDataset(path_to_file, fileIndex, batchQueue, maxCapacity, dataColumnName);
         }
     }
 
-    arrow::Status StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, int maxCapacity);
+    arrow::Status StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue
+        , int maxCapacity, std::string dataColumnName);
 };
 
 
 //=====
 // arrow file streamer
 //=====
-arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, uint32_t curfileInd, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, int maxCapacity)
+arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, uint32_t curfileInd, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue
+    , int maxCapacity, std::string dataColumnName)
 {
     //open file
     std::shared_ptr<arrow::io::RandomAccessFile> input;
@@ -126,7 +128,7 @@ arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, ui
                 ++totalbatches;
                 totaldocs += batch->num_rows();
                 
-                std::shared_ptr<arrow::Array> array = batch->GetColumnByName("text");
+                std::shared_ptr<arrow::Array> array = batch->GetColumnByName(dataColumnName);
                 arrow::StringArray stringArray(array->data());
 
                 if (stringArray.length() == 0)

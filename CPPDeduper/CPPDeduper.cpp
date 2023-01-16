@@ -109,7 +109,7 @@ int main(int argc, const char** argv)
     //reader thread
     LockableQueue< ArrowLoaderThreadOutputData* > batchQueue;
     ArrowLoaderThread arrowLoaderThread;
-    arrowLoaderThread.Start(fileNamesVector, &batchQueue, MAX_RECORDS_LOADED);
+    arrowLoaderThread.Start(fileNamesVector, &batchQueue, MAX_RECORDS_LOADED, dataColumnName);
 
     //hasher threads
     LockableQueue< HasherThreadOutputData* > hashedDataQueue;
@@ -117,7 +117,7 @@ int main(int argc, const char** argv)
     for (int i = 0; i < NUM_HASHER_THREADS; ++i)
     {
         auto hasherThread = new HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES>();
-        hasherThread->Start(&batchQueue, &hashedDataQueue, 64, dataColumnName);
+        hasherThread->Start(&batchQueue, &hashedDataQueue, 64);
         hasherThreads.push_back(hasherThread);
     }
 

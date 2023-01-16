@@ -124,7 +124,9 @@ protected:
         double earlyOut, double dupeThreash, int numHashes);
 };
 
-void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherThreadOutputData* >* hashedDataQueue, std::list< ComparerThreadOutputData* >* allComparedItems, LockableQueue< ComparerThreadOutputData* >* duplicateItems, int chunkSize, double earlyOut, double dupeThreash, int numHashes)
+void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherThreadOutputData* >* hashedDataQueue, 
+        std::list< ComparerThreadOutputData* >* allComparedItems, LockableQueue< ComparerThreadOutputData* >* duplicateItems,
+        int chunkSize, double earlyOut, double dupeThreash, int numHashes)
 {
     std::vector< InternalComparerThread* > internalCompareThread(numberOfInternalThreads, nullptr);
     chunkSize = chunkSize; //do nothing, unreferenced param warning

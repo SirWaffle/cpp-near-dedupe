@@ -31,9 +31,9 @@ public:
     {
     }
 
-    void Start(LockableQueue< ArrowLoaderThreadOutputData* >* batchQueueIn, LockableQueue< HasherThreadOutputData* >* hashedDataQueue, int chunkSize, std::string dataColumnName)
+    void Start(LockableQueue< ArrowLoaderThreadOutputData* >* batchQueueIn, LockableQueue< HasherThreadOutputData* >* hashedDataQueue, int chunkSize)
     {
-        m_thread = new std::thread(&HasherThread::EnterProcFunc, this, m_stop, batchQueueIn, hashedDataQueue, chunkSize, dataColumnName);
+        m_thread = new std::thread(&HasherThread::EnterProcFunc, this, m_stop, batchQueueIn, hashedDataQueue, chunkSize);
     }
 
     void WaitForFinish()
@@ -44,8 +44,7 @@ public:
 
 protected:
     void EnterProcFunc(std::stop_source stop, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueueIn,
-        LockableQueue< HasherThreadOutputData* >* hashedDataQueue, 
-        int chunkSize, std::string dataColumnName)
+        LockableQueue< HasherThreadOutputData* >* hashedDataQueue, int chunkSize)
         {
             std::queue<ArrowLoaderThreadOutputData* > workQueue;
             ArrowLoaderThreadOutputData* workItem;
