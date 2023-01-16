@@ -13,7 +13,7 @@ this project was thrown together in a few days and feuled by large amounts of co
 - thread affinities / priority tweaking
 - handle different CPU intrinsics for more hardware support
 - unit tests
-- file write permissions on output folder
+- check for file write permissions on output folder *before* its ready to write out at end of crunching
 - clearing output folder on run
 - allowing to operate inplace on a dataset
 - allow continuing from a partially crunched set of data
