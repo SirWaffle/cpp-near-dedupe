@@ -19,10 +19,7 @@
 * TODO:
 * - command line params (more, better, etc)
 * - dont need to hang onto hashed data in the compare objects, just there for debugging ( RAM savings )
-* - write out deduped files to another location
-* 
 * - fix all the really slow stuff in duperesolver, easy perf gains
-* - fix structs passed between threads to use shared_ptr's
 */
 
 static constexpr int HASH_LENGTH_SHINGLES = 5; //5 words used per hash
