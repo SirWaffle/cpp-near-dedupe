@@ -231,13 +231,20 @@ protected:
                     }
 
 
-                    std::shared_ptr<arrow::Table> tbl = arrow::Table::FromRecordBatches(batches).MoveValueUnsafe();
-
-                    std::vector<std::shared_ptr<arrow::Array>> arrays;
-                    for (const auto& column : tbl->columns()) {
-                        arrays.push_back(column->chunk(0));
+                    auto tblResult = arrow::Table::FromRecordBatches(batches);
+                    if (!tblResult.ok())
+                    {
+                        std::cout << "ERROR: arrow table failed to create with status error: " << tblResult.status().message() << std::endl;
                     }
-                    outbatch = arrow::RecordBatch::Make(tbl->schema(), tbl->num_rows(), std::move(arrays));
+
+                    std::shared_ptr<arrow::Table> tbl = tblResult.MoveValueUnsafe();
+
+                    auto combRes = tbl->CombineChunksToBatch();
+                    if (!combRes.ok())
+                    {
+                        std::cout << "ERROR: arrow table failed to combine chunks " << combRes.status().message() << std::endl;
+                    }
+                    outbatch = combRes.MoveValueUnsafe();
                 }
 #if DEBUG_MESSAGES
                 else
@@ -258,6 +265,13 @@ protected:
 
 
             arrow::RecordBatch* writeBatch = outbatch.get();
+
+            arrow::Status validated = writeBatch->Validate();
+            if (validated != arrow::Status::OK())
+            {
+                std::cout << "ERROR: recordBatch invalid! " << validated.message() << std::endl << std::endl;
+            }
+
             if (batch_writer->WriteRecordBatch(*writeBatch) != arrow::Status::OK())
             {
                 //TODO:: ERROR
@@ -272,7 +286,7 @@ protected:
 
         auto writeStats = batch_writer->stats();
 
-        std::cout << "   write complete, out of " << rowsLoaded << ", " << rowsWritten << " were written. THere were " << duplicateCount << " duplicates" << std::endl;
+        std::cout << "   write complete, out of " << rowsLoaded << " rows, " << rowsWritten << " rows were written. There were " << duplicateCount << " duplicates" << std::endl;
         std::cout << "   reported written by stats: " << writeStats.num_record_batches << " written batches. " << std::endl;
         
         //close stuff
@@ -289,6 +303,36 @@ protected:
             std::filesystem::remove(outPath);
         }
 
+
+#ifdef _DEBUG
+        //verify the data written matches in length and what not
+        std::shared_ptr<arrow::io::RandomAccessFile> input_dbgoutput;
+        ARROW_ASSIGN_OR_RAISE(input_dbgoutput, arrow::io::MemoryMappedFile::Open(outPath, arrow::io::FileMode::READ));
+        ARROW_ASSIGN_OR_RAISE(auto ipc_reader_dbg, arrow::ipc::RecordBatchStreamReader::Open(input_dbgoutput));
+
+        uint32_t batchCount_dbg = 0;
+        uint64_t rowsLoaded_dbg = 0;
+
+        std::shared_ptr<arrow::RecordBatch> record_batch_dbg;
+        arrow::Status dbgStatus = ipc_reader_dbg->ReadNext(&record_batch_dbg);
+        while (dbgStatus == arrow::Status::OK() && record_batch_dbg != NULL)
+        {
+            batchCount_dbg += 1;
+            rowsLoaded_dbg += record_batch_dbg->num_rows();
+            dbgStatus = ipc_reader_dbg->ReadNext(&record_batch_dbg);
+        }
+        std::cout << "   dbg file status: " << dbgStatus.message() << std::endl;
+        std::cout << "   debug check batch count: " << batchCount_dbg << ",  check row count: " << rowsLoaded_dbg << std::endl;
+
+        if (rowsLoaded_dbg != rowsWritten)
+        {
+            std::cout << "ERROR: mismatch between what was written and what was loaded! investigate" << std::endl;
+            std::cout << "       checked file: " << outPath << std::endl << std::endl;
+        }
+
+        ipc_reader_dbg->Close();
+        input_dbgoutput->Close();      
+#endif
         return arrow::Status::OK();
     }
 
