@@ -50,4 +50,5 @@ executing the program with no cmd args will display the expected cmd args
 ```
 
 # bugs and issues
+- theres very little error handling at the moment, so it can be touchy
 - need to manually clear the output folder / make sure its empty / ensure you have permissions, otherwise std::filesystem:: throws an exception and it fails at the end of crunching.
