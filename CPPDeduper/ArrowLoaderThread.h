@@ -21,7 +21,7 @@ using namespace std::chrono_literals;
 //data 
 struct ArrowLoaderThreadOutputData
 {
-    ArrowLoaderThreadOutputData(uint32_t _docid, uint32_t _batchNum, int64_t _batchLineNumOffset, int64_t _rowNum, U16String& _data)
+    ArrowLoaderThreadOutputData(uint32_t _docid, uint32_t _batchNum, int64_t _batchLineNumOffset, int64_t _rowNum, U16String* _data)
         :docId(_docid),
         batchNum(_batchNum),
         batchLineNumOffset(_batchLineNumOffset),
@@ -32,7 +32,7 @@ struct ArrowLoaderThreadOutputData
     uint32_t batchNum;
     int64_t batchLineNumOffset;
     int64_t rowNum;
-    U16String data;
+    U16String* data;
 };
 
 
@@ -112,8 +112,7 @@ arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, ui
     int batchNum = 0;
     int64_t lineNumOffset = 0;
     while (true)
-    {
-        std::shared_ptr<arrow::RecordBatch> batch;
+    {        
         if (batchQueue->Length() >= maxCapacity)
         {
             std::this_thread::sleep_for(5s);
@@ -121,6 +120,7 @@ arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, ui
         else
         {
             //ARROW_ASSIGN_OR_RAISE(batch, ipc_reader->ReadRecordBatch(batchNum));
+            std::shared_ptr<arrow::RecordBatch> batch;
             if (ipc_reader->ReadNext(&batch) == arrow::Status::OK() && batch != NULL)
             {
                 ++totalbatches;
@@ -145,15 +145,17 @@ arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, ui
                         std::string_view view = stringArray.GetView(i);
 
                         //convert and send
-                        U16String u16str;
-                        CharPtrToUStr(view.data(), view.size(), u16str);
+                        U16String* u16str = new U16String();
+                        CharPtrToUStr(view.data(), view.size(), *u16str);
 
-                        ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData(curfileInd, batchNum, lineNumOffset, i, u16str);
+                        ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData(curfileInd, batchNum, lineNumOffset, i, std::move(u16str));
                         batchQueue->push(std::move(data));
                     }
                 }
                 batchNum++;
                 lineNumOffset += batch->num_rows(); //next offset for the next batch
+
+                batch.reset();
             }
             else
             {

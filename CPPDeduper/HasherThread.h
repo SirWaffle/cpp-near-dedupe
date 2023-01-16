@@ -66,8 +66,9 @@ protected:
                     workQueue.pop();
     
                     std::unique_ptr<uint32_t[]> hashes;
-                    uint32_t hashLen = MakeFingerprint<HASH_LEN_SHINGLES, NUM_HASHES>(workItem->data, &hashes);
-                    workItem->data.clear();
+                    uint32_t hashLen = MakeFingerprint<HASH_LEN_SHINGLES, NUM_HASHES>(*(workItem->data), &hashes);
+                    delete(workItem->data);
+                    workItem->data = nullptr;
 
                     //push into hashedQueue
                     HasherThreadOutputData* hashed = new HasherThreadOutputData(workItem, std::move(hashes), hashLen);
