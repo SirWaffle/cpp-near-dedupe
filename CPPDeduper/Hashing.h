@@ -150,8 +150,8 @@ public:
             }
         };
 
-//#pragma warning( push )
-//#pragma warning( disable : 4333)
+#pragma warning( push )
+#pragma warning( disable : 4333)
         auto ReadWord = [&]() {
             while (i < txt_length && IsAlphanum(txt[i])) {
                 uint16_t c = txt[i];
@@ -171,7 +171,7 @@ public:
                 i++;
             }
         };
-//#pragma warning( pop ) 
+#pragma warning( pop ) 
 
         auto ShiftPipeline = [&]() {
             for (int k = 0; k < K - 1; k++) {

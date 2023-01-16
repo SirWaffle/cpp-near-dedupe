@@ -13,7 +13,7 @@ struct ComparerThreadOutputData
 {
     HasherThreadOutputData* myHashData;
     double maxMatchedVal;
-    HasherThreadOutputData* maxMatchedData;
+    //HasherThreadOutputData* maxMatchedData;
 };
 
 //TODO: reuse the internal threads for speedup PERF
@@ -150,7 +150,7 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
                 workQueue.pop();
 
                 ComparerThreadOutputData* citem = new ComparerThreadOutputData();
-                citem->maxMatchedData = nullptr;
+                //citem->maxMatchedData = nullptr;
                 citem->maxMatchedVal = 0.0;
                 citem->myHashData = workItem;
 
@@ -165,7 +165,7 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
                 workQueue.pop();
 
                 ComparerThreadOutputData* citem = new ComparerThreadOutputData();
-                citem->maxMatchedData = nullptr;
+                //citem->maxMatchedData = nullptr;
                 citem->maxMatchedVal = 0.0;
                 citem->myHashData = workItem;
 
@@ -249,7 +249,7 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
                     if (match > citem->maxMatchedVal)
                     {
                         citem->maxMatchedVal = match;
-                        citem->maxMatchedData = (*it)->myHashData;
+                        //citem->maxMatchedData = (*it)->myHashData;
 
                         if (citem->maxMatchedVal > dupeThreash)
                         {
