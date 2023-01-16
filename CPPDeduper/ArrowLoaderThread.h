@@ -33,6 +33,10 @@ struct ArrowLoaderThreadOutputData
     int64_t batchLineNumOffset;
     int64_t rowNum;
     U16String* data;
+
+#ifdef _DEBUG
+    std::string sourceFilePath;
+#endif
 };
 
 
@@ -151,6 +155,9 @@ arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, ui
                         CharPtrToUStr(view.data(), view.size(), *u16str);
 
                         ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData(curfileInd, batchNum, lineNumOffset, i, std::move(u16str));
+#ifdef _DEBUG
+                        data->sourceFilePath = path_to_file;
+#endif
                         batchQueue->push(std::move(data));
                     }
                 }

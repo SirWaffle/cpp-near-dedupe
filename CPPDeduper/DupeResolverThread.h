@@ -111,8 +111,11 @@ protected:
         ARROW_ASSIGN_OR_RAISE(auto batch_writer, arrow::ipc::MakeStreamWriter(output_file.get(), schema, options));
 
         //read
+        uint32_t duplicateCount = sortedDupes.size();
         uint32_t batchCount = 0;
         int64_t batchLineNumOffset = 0;
+        uint64_t rowsWritten = 0;
+        uint64_t rowsLoaded = 0;
 
         std::shared_ptr<arrow::RecordBatch> record_batch;
         while (ipc_reader->ReadNext(&record_batch) == arrow::Status::OK() && record_batch != NULL)
@@ -123,6 +126,7 @@ protected:
             //will need to ahndle having to remove ROWS // or rebuilding the batch without the dupes
             //TODO: detect which things we want to remove, we know batch + line, so that *should help*
             std::shared_ptr<arrow::RecordBatch> outbatch = record_batch;;
+            rowsLoaded += record_batch->num_rows();
 
             //calc the actual ronum of the first item
             if(sortedDupes.size() > 0)
@@ -148,9 +152,18 @@ protected:
                 {
                     //this loops, and slices everything *bnefore* the dupe, and we combine them all together to reassemble the table without dupes
                     while (dupeRowNumAbsolute >= batchLineNumOffset && dupeRowNumAbsolute < batchLineNumOffset + record_batch->num_rows())
-                    {
-#if DEBUG_MESSAGES
-                        ComparerThreadOutputData* compareData = sortedDupes.front();
+                    {                        
+#ifdef _DEBUG
+                        {
+                            ComparerThreadOutputData* compareData = *sortedDupes.begin();
+                            if (compareData->myHashData->arrowData->sourceFilePath != sourcePath)
+                            {
+                                std::cout << "pathfile mismatch!" << std::endl;
+                            }
+                        }
+#endif
+#if false //DEBUG_MESSAGES                
+                        ComparerThreadOutputData* compareData = *sortedDupes.begin();
                         std::cout << " looking at dupe with vals " << compareData->myHashData->arrowData->batchNum << ", "
                             << compareData->myHashData->arrowData->batchLineNumOffset << ", "
                             << compareData->myHashData->arrowData->rowNum << std::endl;
@@ -160,9 +173,9 @@ protected:
 
                         uint64_t dupeRowNumRelative = dupeRowNumAbsolute - batchLineNumOffset;
                         batchEnd = dupeRowNumRelative;
-                        if (batchEnd == batchStart)
+                        if (batchEnd > batchStart)
                         {
-                            std::shared_ptr<arrow::RecordBatch> sliced = record_batch->Slice(batchStart, batchEnd);
+                            std::shared_ptr<arrow::RecordBatch> sliced = record_batch->Slice(batchStart, batchEnd - batchStart);
                             //store in our batchVector
                             batches.push_back(sliced);
 #if DEBUG_MESSAGES
@@ -230,7 +243,7 @@ protected:
                 else
                 {
                     //hrm...
-                    ComparerThreadOutputData* compareData = sortedDupes.front();
+                    ComparerThreadOutputData* compareData = *sortedDupes.begin();
                     std::cout << "dupe failed range check with vals " << compareData->myHashData->arrowData->batchNum << ", "
                         << compareData->myHashData->arrowData->batchLineNumOffset << ", "
                         << compareData->myHashData->arrowData->rowNum << std::endl;
@@ -250,8 +263,14 @@ protected:
                 //TODO:: ERROR
                 std::cout << "OH SNAP 2!" << std::endl;
             }
+   
+            rowsWritten += writeBatch->num_rows();
+#if DEBUG_MESSAGES   
+            std::cout << "Loaded rows: " << rowsLoaded << "   written rows: " << rowsWritten << std::endl;
+#endif
         }
 
+        std::cout << "   write complete, out of " << rowsLoaded << ", " << rowsWritten << " were written, and there were " << duplicateCount << " duplicates" << std::endl;
         //close stuff
         arrow::Status status = ipc_reader->Close();
         status = input->Close();
