@@ -39,7 +39,6 @@ ADD_CUSTOM_TARGET(release
 SET(TARGET_H
     ArrowLoaderThread.h 
     ComparerThread.h
-    CPPDeduper.h
     DupeResolverThread.h
     HasherThread.h
     Hashing.h
