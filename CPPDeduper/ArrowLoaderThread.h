@@ -152,7 +152,6 @@ arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, ui
                         batchQueue->push(std::move(data));
                     }
                 }
-                batch.reset();
                 batchNum++;
                 lineNumOffset += batch->num_rows(); //next offset for the next batch
             }
