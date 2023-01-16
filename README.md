@@ -22,15 +22,18 @@ this project was thrown together in a few days and feuled by large amounts of co
 - windows
 
 ```
-visual studio:
-see apache arrow isntallation docs for installing arrow dependencies
+visual studio 2022 community edition:
+see apache arrow installation docs for installing arrow dependencies
 
-open the sln (for sln based ) or the folder with the cmakelists.txt file (for cmake based)
+open the sln (for sln based ) 
+or 
+open the folder with the cmakelists.txt file (for cmake based)
 ```
 
 - Linux ( tested on ubuntu WSL2 )
-- due to accessing windows drives, i had to sudo every command to avoid errors. This maynot be neccessary for your particular setup.
 ```
+due to accessing windows mounts, i had to sudo every command to avoid errors. This may not be neccessary for your particular setup, but better safe than sorry.
+
 Cmake:
 see apache arrow isntallation docs for installing arrow dependencies
 
