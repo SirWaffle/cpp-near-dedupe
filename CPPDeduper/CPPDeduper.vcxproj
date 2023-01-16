@@ -137,7 +137,6 @@
   <ItemGroup>
     <ClInclude Include="ArrowLoaderThread.h" />
     <ClInclude Include="ComparerThread.h" />
-    <ClInclude Include="CPPDeduper.h" />
     <ClInclude Include="DupeResolverThread.h" />
     <ClInclude Include="HasherThread.h" />
     <ClInclude Include="Hashing.h" />

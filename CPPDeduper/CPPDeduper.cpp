@@ -1,7 +1,18 @@
 ﻿// CPPDeduper.cpp : Defines the entry point for the application.
 //
 
-#include "CPPDeduper.h"
+#include <filesystem>
+#include <chrono>
+#include <thread>
+#include <queue>
+#include <condition_variable>
+#include <iostream>
+
+#include "DupeResolverThread.h"
+#include "ComparerThread.h"
+#include "HasherThread.h"
+#include "ArrowLoaderThread.h"
+#include "LockableQueue.h"
 
 
 /*
@@ -30,7 +41,12 @@ static std::vector<std::string> fileNamesVector;
 
 //some stats to watch as the thing crunches. values are questionable since im
 //no tbothering with thread saftey or anything, its all reads so w/e
-static void StatsOutputThread_func(std::stop_source* threadstop, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, LockableQueue< HasherThreadOutputData* >* hashedDataQueue, std::list< ComparerThreadOutputData* >* allComparedItems)
+static void StatsOutputThread_func(std::stop_source* threadstop,
+    LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, 
+    LockableQueue< HasherThreadOutputData* >* hashedDataQueue, 
+    std::list< ComparerThreadOutputData* >* allComparedItems,
+    ArrowLoaderThread* arrowLoaderThread,
+    DupeResolverThread* dupeResolverThread)
 {
     auto startStats = std::chrono::high_resolution_clock::now();
     while (!threadstop->stop_requested())
@@ -38,10 +54,12 @@ static void StatsOutputThread_func(std::stop_source* threadstop, LockableQueue< 
         std::this_thread::sleep_for(10s);
         auto curTime = std::chrono::high_resolution_clock::now();
         auto duration = duration_cast<std::chrono::seconds>(curTime - startStats);
-        std::cout << "[" << duration.count() << "] Backlogs:"
-            << "   Awaiting Hashing: " << batchQueue->Length()
-            << "   Awaiting Jaccard: " << hashedDataQueue->Length()
-            << "   Awaiting output: " << allComparedItems->size()
+        std::cout << "[ " << duration.count() << "s ] Stats:"
+            << "   Docs Loaded: " << arrowLoaderThread->GetTotalDocs()
+            << "   Pending Hash: " << batchQueue->Length()
+            << "   Pending Jaccard: " << hashedDataQueue->Length()
+            << "   Unique Docs: " << allComparedItems->size()
+            << "   Dupe Docs: " << dupeResolverThread->PendingDuplicates() 
             << std::endl;
     }
 }
@@ -134,7 +152,7 @@ int main(int argc, const char** argv)
     
     //lets start a stats out thread so we dont get bored
     std::stop_source statThreadStopper;
-    std::thread statsThread(StatsOutputThread_func, &statThreadStopper, &batchQueue, &hashedDataQueue, &allComparedItems);
+    std::thread statsThread(StatsOutputThread_func, &statThreadStopper, &batchQueue, &hashedDataQueue, &allComparedItems, &arrowLoaderThread, &dupeResolverThread);
 
     //reader thread is first to finish in this pipeline
     arrowLoaderThread.WaitForFinish();

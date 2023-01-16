@@ -47,6 +47,7 @@ protected:
     std::string baseOutPath;
 
     //some stats
+    uint32_t pendingDuplicates = 0;
     uint32_t totalDuplicates = 0;
     uint32_t totalDuplicatesSkipped = 0;
 
@@ -79,6 +80,11 @@ public:
     uint32_t TotalDupesRemoved()
     {
         return totalDuplicatesSkipped;
+    }
+
+    uint32_t PendingDuplicates()
+    {
+        return pendingDuplicates;
     }
 
 protected:
@@ -282,6 +288,7 @@ protected:
 
             while (workQueue.size() > 0)
             {
+                ++pendingDuplicates;
                 workItem = workQueue.front();
                 workQueue.pop();
 
