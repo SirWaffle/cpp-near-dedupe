@@ -11,6 +11,7 @@
 
 #include <chrono>
 #include <iostream>
+#include <set>
 
 #include "ArrowLoaderThread.h"
 #include "ComparerThread.h"
@@ -23,15 +24,16 @@
 //resolves the dupe files, writes out to arrow memory mapped files to mimic hugging faces datasets
 //only processes files completed by the loader thread, so we dont operate on the same files at the same time
 
-//insertion of elements into the dupes per file list..
-bool compare_batchNums(const ComparerThreadOutputData* first, ComparerThreadOutputData* second)
-{
-    if (first->myHashData->arrowData->batchNum == second->myHashData->arrowData->batchNum)
+struct compare_batchNums_insert {
+    bool operator() (const ComparerThreadOutputData* first, ComparerThreadOutputData* second) const
     {
-        return (first->myHashData->arrowData->rowNum < second->myHashData->arrowData->rowNum);
+        if (first->myHashData->arrowData->batchNum == second->myHashData->arrowData->batchNum)
+        {
+            return (first->myHashData->arrowData->rowNum < second->myHashData->arrowData->rowNum);
+        }
+        return (first->myHashData->arrowData->batchNum < second->myHashData->arrowData->batchNum);
     }
-    return (first->myHashData->arrowData->batchNum < second->myHashData->arrowData->batchNum);
-}
+};
 
 
 class DupeResolverThread
@@ -41,7 +43,7 @@ protected:
     std::stop_source m_stop;
 
     //for storing duplicate items by file id
-    std::map<uint32_t, std::list<ComparerThreadOutputData*> > fileIdToDuplicate;
+    std::map<uint32_t, std::set<ComparerThreadOutputData*, compare_batchNums_insert > > fileIdToDuplicate;
 
     std::filesystem::path baseInPath;
     std::string baseOutPath;
@@ -88,7 +90,7 @@ public:
     }
 
 protected:
-    arrow::Status CopyFileSansDupes(std::string sourcePath, std::string outPath, std::list<ComparerThreadOutputData*> sortedDupes)
+    arrow::Status CopyFileSansDupes(std::string sourcePath, std::string outPath, std::set<ComparerThreadOutputData*, compare_batchNums_insert> sortedDupes)
     {
         //open the arrow file, stream it in batches, write it in batchs ( if and only if its not in the list of dupes )
         //some magic to mirror the same dir structure and filenames from the source...somehow... 
@@ -125,14 +127,14 @@ protected:
             //calc the actual ronum of the first item
             if(sortedDupes.size() > 0)
             {
-                int64_t dupeRowNumAbsolute = sortedDupes.front()->myHashData->arrowData->batchLineNumOffset;
-                dupeRowNumAbsolute += sortedDupes.front()->myHashData->arrowData->rowNum;
+                int64_t dupeRowNumAbsolute = (*sortedDupes.begin())->myHashData->arrowData->batchLineNumOffset;
+                dupeRowNumAbsolute += (*sortedDupes.begin())->myHashData->arrowData->rowNum;
                 //row num is the offset of the rows loaded from the batch lodaer, plus the actual rownum in that batch
 
                 //error catch:
                 if (batchLineNumOffset > dupeRowNumAbsolute)
                 {
-                    ComparerThreadOutputData* compareData = sortedDupes.front();
+                    ComparerThreadOutputData* compareData = (*sortedDupes.begin());
                     std::cout << " missed dupe with vals " << compareData->myHashData->arrowData->batchNum << ", "
                         << compareData->myHashData->arrowData->batchLineNumOffset << ", "
                         << compareData->myHashData->arrowData->rowNum << std::endl;
@@ -153,7 +155,7 @@ protected:
                             << compareData->myHashData->arrowData->batchLineNumOffset << ", "
                             << compareData->myHashData->arrowData->rowNum << std::endl;
 #endif
-                        sortedDupes.pop_front();
+                        sortedDupes.erase(sortedDupes.begin());
                         ++totalDuplicatesSkipped;
 
                         uint64_t dupeRowNumRelative = dupeRowNumAbsolute - batchLineNumOffset;
@@ -191,8 +193,8 @@ protected:
                             break;
 
                         //continue removing/skipping items in range
-                        dupeRowNumAbsolute = sortedDupes.front()->myHashData->arrowData->batchLineNumOffset;
-                        dupeRowNumAbsolute += sortedDupes.front()->myHashData->arrowData->rowNum;
+                        dupeRowNumAbsolute = (*sortedDupes.begin())->myHashData->arrowData->batchLineNumOffset;
+                        dupeRowNumAbsolute += (*sortedDupes.begin())->myHashData->arrowData->rowNum;
                     }
 #if DEBUG_MESSAGES
                     std::cout << "stopped slicing due to dupeabs " << dupeRowNumAbsolute << " is >= batchln " << batchLineNumOffset << " + " << record_batch->num_rows() << std::endl;
@@ -242,8 +244,6 @@ protected:
             batchLineNumOffset += record_batch->num_rows();
 
 
-
-            //todo, check against out list of dupes, if its there, do not* write it out
             arrow::RecordBatch* writeBatch = outbatch.get();
             if (batch_writer->WriteRecordBatch(*writeBatch) != arrow::Status::OK())
             {
@@ -297,11 +297,11 @@ protected:
                 auto docIdList = fileIdToDuplicate.find(workItem->myHashData->arrowData->docId);
                 if (docIdList == fileIdToDuplicate.end())
                 {
-                    fileIdToDuplicate.insert(std::pair{ workItem->myHashData->arrowData->docId, std::list<ComparerThreadOutputData*>({ workItem }) } );
+                    fileIdToDuplicate.insert(std::pair{ workItem->myHashData->arrowData->docId, std::set<ComparerThreadOutputData*, compare_batchNums_insert >({ workItem }) } );
                 }
                 else
                 {
-                    docIdList->second.push_back(workItem);
+                    docIdList->second.insert(workItem);
                 }
             }
         }
@@ -314,7 +314,7 @@ protected:
             std::string fname = (*fileNamesVector)[sourceFileInd];
 
             //create source and dest path for datasets
-                            //lets use the baseIn, baseOut, and full filepath to mirror the initial datastructe and what not
+            //lets use the baseIn, baseOut, and full filepath to mirror the initial datastructe and what not
             std::filesystem::path datasetPath = fname;
             std::filesystem::path outPath = baseOutPath;
 
@@ -357,10 +357,6 @@ protected:
             {
                 totalDuplicates += (uint32_t)(*dupeIt).second.size();
                 std::cout << "     Removing duplicates ->  duplicate count: " << (uint32_t)(*dupeIt).second.size() << std::endl;
-
-                //lazy, sort the list. would be better ot insert sorted but, do that once this works
-                //TODO: perf
-                (*dupeIt).second.sort(compare_batchNums);
 
                 arrow::Status ret = CopyFileSansDupes(fname, outPath.string(), (*dupeIt).second);
             }
