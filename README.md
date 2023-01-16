@@ -2,7 +2,7 @@
 dedupes arrow datasets ( IPC .arrow db's at the moment) using minhash / jaccard similarity scores. Uses multiple threads to speed things up
 
 # warning
-this project was thrown together in a few days, so more improvements will come
+this project was thrown together in a few days and feuled by large amounts of coffee, so things are getting cleaned / fixed / improved, and there are likely bugs and other oddities in the code 
 
 # todo
 - better readme
