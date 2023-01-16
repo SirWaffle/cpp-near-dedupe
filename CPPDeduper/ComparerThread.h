@@ -65,16 +65,9 @@ protected:
 //this wilkl prioritize removing later documents that match, not the first one
         for (auto it = allComparedItems->begin(); it != allComparedItems->end() && citem->maxMatchedVal < dupeThreash; it++)
         {
-#pragma message("figure out intrinsics on gcc")
-#ifndef __GNUC__
             double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
                 (*it)->myHashData->hashes.get(), (*it)->myHashData->hashLen,
                 earlyOut);
-#else
-            double match = JaccardFast(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
-                (*it)->myHashData->hashes.get(), (*it)->myHashData->hashLen,
-                earlyOut);
-#endif
             if (match > maxMatchVal)
             {
                 maxMatchVal = match;
@@ -238,16 +231,10 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
                 //this wilkl prioritize removing later documents that match, not the first one
                 for (auto it = potenialKeepers.begin(); it != potenialKeepers.end() && citem->maxMatchedVal < dupeThreash; it++)
                 {
-#pragma message("figure out intrinsics on gcc")
-#ifndef __GNUC__
                     double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
                         (*it)->myHashData->hashes.get(), (*it)->myHashData->hashLen,
                         earlyOut);
-#else
-                    double match = JaccardFast(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
-                        (*it)->myHashData->hashes.get(), (*it)->myHashData->hashLen,
-                        earlyOut);
-#endif
+
                     if (match > citem->maxMatchedVal)
                     {
                         citem->maxMatchedVal = match;

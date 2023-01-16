@@ -12,6 +12,12 @@
 
 #include "isalphanum.h"
 
+#ifdef __GNUC__
+#include <nmmintrin.h>
+#include <emmintrin.h>
+#else
+#endif
+
 double JaccardClassical(const uint32_t* fng1, int len1, const uint32_t* fng2, int len2, double )
 {
     int pos1 = 0;
@@ -63,7 +69,6 @@ double JaccardFast(const uint32_t* fng1, int len1, const uint32_t* fng2, int len
     return nintersect / (double)nunion;
 }
 
-#ifndef __GNUC__
 double JaccardTurbo(const uint32_t* fng1, int len1, const uint32_t* fng2, int len2, double alpha)
 {
     int smin = (int)std::ceil((1.0 - alpha) / (1.0 + alpha) * (len1 + len2));
@@ -122,8 +127,6 @@ double JaccardTurbo(const uint32_t* fng1, int len1, const uint32_t* fng2, int le
     int nunion = len1 + len2 - nintersect;
     return nintersect / (double)nunion;
 }
-
-#endif
 
 template<typename Func>
 void JaccardWrapper(Func func, const uint32_t* hashes, const std::vector<int>& offsets) {
