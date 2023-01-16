@@ -38,7 +38,7 @@ static void StatsOutputThread_func(std::stop_source* threadstop, LockableQueue< 
         std::this_thread::sleep_for(10s);
         auto curTime = std::chrono::high_resolution_clock::now();
         auto duration = duration_cast<std::chrono::seconds>(curTime - startStats);
-        std::cout << "[" << duration << "] Backlogs:"
+        std::cout << "[" << duration.count() << "] Backlogs:"
             << "   Awaiting Hashing: " << batchQueue->Length()
             << "   Awaiting Jaccard: " << hashedDataQueue->Length()
             << "   Awaiting output: " << allComparedItems->size()
