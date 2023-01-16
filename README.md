@@ -17,6 +17,7 @@ this project was thrown together in a few days and feuled by large amounts of co
 - clearing output folder on run
 - allowing to operate inplace on a dataset
 - allow continuing from a partially crunched set of data
+- cuda support for even faster fastness
 
 # building
 - windows
