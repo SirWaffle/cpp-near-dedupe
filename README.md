@@ -23,23 +23,19 @@ this project was thrown together in a few days and feuled by large amounts of co
 
 ```
 visual studio:
+see apache arrow isntallation docs for installing arrow dependencies
+
 open the sln (for sln based ) or the folder with the cmakelists.txt file (for cmake based)
 ```
 
-- WSL ( tested on ubuntu )
-due to accessing windows drives, i had to sudo every command to avoid errors:
+- Linux ( tested on ubuntu WSL2 )
+- due to accessing windows drives, i had to sudo every command to avoid errors. This maynot be neccessary for your particular setup.
 ```
 Cmake:
+see apache arrow isntallation docs for installing arrow dependencies
+
 sudo cmake .
 sudo make release
-```
-
-- linux ( tested on ubuntu )
-
-```
-Cmake:
-cmake .
-make release
 ```
 
 # running
