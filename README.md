@@ -2,15 +2,16 @@
 dedupes arrow datasets ( IPC .arrow db's at the moment) using minhash / jaccard similarity scores. Uses multiple threads to speed things up
 
 # warning
-this project was thrown together in a few days and feuled by large amounts of coffee, so things are getting cleaned / fixed / improved, and there are likely bugs and other oddities in the code 
+this project was thrown together in a few days and fueled by large amounts of coffee, so things are getting cleaned / fixed / improved, and there are likely bugs and other oddities in the code 
 
 # todo
+- thread pools
+- contiguous blocks of hashed values
 - better readme
 - more commandline arguments for more options
 - better error checking
 - handle various arrow formats
 - more perf and ram optimizations
-- thread affinities / priority tweaking
 - handle different CPU intrinsics for more hardware support
 - unit tests
 - check for file write permissions on output folder *before* its ready to write out at end of crunching
