@@ -32,7 +32,8 @@ open the folder with the cmakelists.txt file (for cmake based)
 
 - Linux ( tested on ubuntu WSL2 )
 ```
-due to accessing windows mounts, i had to sudo every command to avoid errors. This may not be neccessary for your particular setup, but better safe than sorry.
+due to accessing windows mounts, i had to sudo every command to avoid errors.
+This may not be neccessary for your particular setup, but better safe than sorry.
 
 Cmake:
 see apache arrow isntallation docs for installing arrow dependencies
