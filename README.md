@@ -5,7 +5,7 @@ dedupes arrow datasets ( IPC .arrow db's at the moment) using minhash / jaccard 
 this project was thrown together in a few days and fueled by large amounts of coffee, so things are getting cleaned / fixed / improved, and there are likely bugs and other oddities in the code 
 
 # todo
-- contiguous blocks of hashed values
+- contiguous blocks of hashed values to imcrease speed of comparison checks using jaccard ( this is the long leg at the moment )
 - better readme
 - more commandline arguments for more options
 - better error checking
