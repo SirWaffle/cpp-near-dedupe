@@ -144,8 +144,6 @@ public:
                 {
                     docIdList->second.insert(std::move(workItem));
                 }
-
-                delete workItem;
             }
         }
 
