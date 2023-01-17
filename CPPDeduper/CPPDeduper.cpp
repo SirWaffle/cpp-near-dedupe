@@ -19,18 +19,15 @@
 /*
 * TODO:
 * - command line params (more, better, etc)
-* - dont need to hang onto hashed data in the compare objects, just there for debugging ( RAM savings )
 * - fix all the really slow stuff in duperesolver, easy perf gains
 */
 
 static constexpr int HASH_LENGTH_SHINGLES = 5; //5 words used per hash
 static constexpr int NUM_HASHES = 256; //256 //number of hashes for comparison
-static constexpr int MAX_RECORDS_LOADED = 4096 * 16; //the higher this is, the higher memory usage can get
-static constexpr double JACCARD_EARLY_OUT = 0.5; //speeds up the comparisons by early outting
+static constexpr int MAX_RECORDS_LOADED = 4096 * 32; //the higher this is, the higher memory usage can get
 
 //thread counts
 static constexpr int NUM_HASHER_THREADS = 4; // 4; //more threads crunch through mroe input faster
-
 
 
 //==========
@@ -40,7 +37,7 @@ int main(int argc, const char** argv)
 {
     if (argc < 6)
     {
-        std::cout << "usage: (this.exe) \"path\" \".ext\" \"dataColumn\" dupeThreashold \"outdir\"" << std::endl;
+        std::cout << "usage: (this.exe) \"path\" \".ext\" \"dataColumn\" dupeThreshold \"outdir\"" << std::endl;
         std::cout << "example: (this.exe) \"c:\\baseDirWithLotsOfArrowInSubdirs\" \".arrow\" \"text\" 0.7 \"c:\\outDir\"" << std::endl;
         return 1;
     }
@@ -51,12 +48,12 @@ int main(int argc, const char** argv)
     std::string dataColumnName = argv[3];
 
     char* p;
-    double matchThreash = strtod(argv[4], &p);
+    double matchThresh = strtod(argv[4], &p);
 
     std::string output = argv[5];
 
 
-    std::cout << "Running with params: " << basePath << ", " << extension << ", " << dataColumnName << ", " << matchThreash << ", " << output << std::endl;
+    std::cout << "Running with params: " << basePath << ", " << extension << ", " << dataColumnName << ", " << matchThresh << ", " << output << std::endl;
     std::cout << "Scanning for " << extension << " files in " << basePath;
 
     //quick and sloppy lookups of filenames, so we dont have to store in each unit of data
@@ -124,11 +121,14 @@ int main(int argc, const char** argv)
     std::list< ComparerThreadOutputData* > allComparedItems;
     LockableQueue< ComparerThreadOutputData* > duplicates;
     ComparerThread* comparerThread = new ComparerThread(true, 4096, &threadPool, std::max(1U, numThreads - baseThreads));
-    std::future<void> comparerThreadFuture = threadPool.submit(&ComparerThread::EnterProcFunc, comparerThread, &hashedDataQueue, &allComparedItems, &duplicates, 64, JACCARD_EARLY_OUT, matchThreash, NUM_HASHES);
+
+    //for binary 'dupe or not', we dont need to score, so use the threshval for early out as well
+    std::future<void> comparerThreadFuture = threadPool.submit(&ComparerThread::EnterProcFunc, comparerThread, &hashedDataQueue, &allComparedItems, 
+        &duplicates, /*JACCARD_EARLY_OUT*/ matchThresh, matchThresh);
 
     //and as the comparer spits out the dupes, we can start removing them from the datasets...
-    DupeResolverThread* dupeResolverThread = new DupeResolverThread(basePath, output, 4096);
-    std::future<void> dupeResolverThreadFuture = threadPool.submit(&DupeResolverThread::EnterProcFunc, dupeResolverThread, &allComparedItems , &duplicates, arrowLoaderThread, &fileNamesVector);
+    DupeResolverThread* dupeResolverThread = new DupeResolverThread(basePath, output, 4096, false);
+    std::future<void> dupeResolverThreadFuture = threadPool.submit(&DupeResolverThread::EnterProcFunc, dupeResolverThread, &duplicates, &fileNamesVector);
     
 
     //wait for tasks to complete
@@ -219,4 +219,10 @@ int main(int argc, const char** argv)
     delete arrowLoaderThread;
     delete comparerThread;
     delete dupeResolverThread;
+    while (allComparedItems.size() > 0)
+    {
+        delete allComparedItems.front();
+        allComparedItems.pop_front();
+    }
+   
 }

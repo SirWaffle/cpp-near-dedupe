@@ -21,17 +21,27 @@ using namespace std::chrono_literals;
 //data 
 struct ArrowLoaderThreadOutputData
 {
-    ArrowLoaderThreadOutputData(uint32_t _docid, uint32_t _batchNum, int64_t _batchLineNumOffset, int64_t _rowNum, U16String* _data)
+    ArrowLoaderThreadOutputData(uint32_t _docid, int64_t _batchLineNumOffset, int64_t _rowNum, U16String* _data)
         :docId(_docid),
-        batchNum(_batchNum),
-        batchLineNumOffset(_batchLineNumOffset),
-        rowNum(_rowNum),
         data(std::move(_data))
-    { }
+    {
+        rowNumber = _batchLineNumOffset + _rowNum;
+    }
+
+    ~ArrowLoaderThreadOutputData()
+    {
+        DeleteData();
+    }
+
+    void DeleteData()
+    {
+        //data->clear();
+        delete data;
+        data = nullptr;
+    }
+
     uint32_t docId;
-    uint32_t batchNum;
-    int64_t batchLineNumOffset;
-    int64_t rowNum;
+    int64_t rowNumber;
     U16String* data;
 
 #ifdef _DEBUG
@@ -145,7 +155,7 @@ arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, ui
                         U16String* u16str = new U16String();
                         CharPtrToUStr(view.data(), view.size(), *u16str);
 
-                        ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData(curfileInd, batchNum, lineNumOffset, i, std::move(u16str));
+                        ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData(curfileInd, lineNumOffset, i, std::move(u16str));
 #ifdef _DEBUG
                         data->sourceFilePath = path_to_file;
 #endif

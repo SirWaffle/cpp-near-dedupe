@@ -12,6 +12,16 @@
 
 struct ComparerThreadOutputData
 {
+    ComparerThreadOutputData(HasherThreadOutputData* _myHashData, double _maxMatchedVal)
+        :myHashData(_myHashData)
+        ,maxMatchedVal(_maxMatchedVal)
+    {}
+
+    ~ComparerThreadOutputData()
+    {
+        delete myHashData;
+    }
+
     HasherThreadOutputData* myHashData;
     double maxMatchedVal;
 };
@@ -37,7 +47,7 @@ public:
         return item;
     }
 
-    void EnterProcFunc(std::list< ComparerThreadOutputData* >* allComparedItems, double earlyOut, double dupeThreash, int numHashes, ComparerThreadOutputData* citem)
+    void EnterProcFunc(std::list< ComparerThreadOutputData* >* allComparedItems, double earlyOut, double dupeThreash, ComparerThreadOutputData* citem)
     {
         maxMatchVal = 0.0;
         item = citem;
@@ -99,16 +109,14 @@ public:
     void EnterProcFunc(LockableQueue< HasherThreadOutputData* >* hashedDataQueue,
         std::list< ComparerThreadOutputData* >* allComparedItems, 
         LockableQueue< ComparerThreadOutputData* >* duplicateItems, 
-        int chunkSize,
-        double earlyOut, double dupeThreash, int numHashes);
+        double earlyOut, double dupeThreash);
 };
 
 void ComparerThread::EnterProcFunc(LockableQueue< HasherThreadOutputData* >* hashedDataQueue, 
         std::list< ComparerThreadOutputData* >* allComparedItems, LockableQueue< ComparerThreadOutputData* >* duplicateItems,
-        int chunkSize, double earlyOut, double dupeThreash, int numHashes)
+        double earlyOut, double dupeThreash)
 {
     std::vector< InternalComparerThread > internalCompareThread;
-    chunkSize = chunkSize; //do nothing, unreferenced param warning
 
     //this guy needs to compare each incoming hashed data against all prexisting data, gonna be slow.
     std::queue<HasherThreadOutputData* > workQueue;
@@ -130,12 +138,11 @@ void ComparerThread::EnterProcFunc(LockableQueue< HasherThreadOutputData* >* has
                 workItem = workQueue.front();
                 workQueue.pop();
 
-                ComparerThreadOutputData* citem = new ComparerThreadOutputData();
+                ComparerThreadOutputData* citem = new ComparerThreadOutputData(std::move(workItem), 0.0);
 
-                citem->maxMatchedVal = 0.0;
-                citem->myHashData = workItem;
-
-                allComparedItems->push_back(citem);
+                //these dont need the arrow data, since they are nto being removed later
+                citem->myHashData->DeleteArrowData();
+                allComparedItems->push_back(std::move(citem));
                 continue;
             }
 
@@ -149,18 +156,15 @@ void ComparerThread::EnterProcFunc(LockableQueue< HasherThreadOutputData* >* has
 
             for (size_t i = 0; i < threadsToUse && workQueue.size() > 0; ++i)
             {
-                workItem = workQueue.front();
+                workItem = std::move(workQueue.front());
                 workQueue.pop();
 
-                ComparerThreadOutputData* citem = new ComparerThreadOutputData();
-                citem->maxMatchedVal = 0.0;
-                citem->myHashData = workItem;
-
-                //thread->Start(allComparedItems, earlyOut, dupeThreash, numHashes, std::move(citem));                
+                ComparerThreadOutputData* citem = new ComparerThreadOutputData(std::move(workItem), 0.0);
+           
                 internalCompareThreadFutures.push_back(
                     threadPool->submit(&InternalComparerThread::EnterProcFunc, 
                     &internalCompareThread[i], allComparedItems,
-                    earlyOut, dupeThreash, numHashes, std::move(citem))
+                    earlyOut, dupeThreash, std::move(citem))
                 );
             }
 
@@ -200,7 +204,7 @@ void ComparerThread::EnterProcFunc(LockableQueue< HasherThreadOutputData* >* has
             //now, compare all potential keepers against each other...
             while(potenialKeepers.size() > 0)
             {
-                ComparerThreadOutputData* citem = potenialKeepers.front();
+                ComparerThreadOutputData* citem = std::move(potenialKeepers.front());
                 potenialKeepers.pop_front();
 
                 //compare incoming against all others, update the its max value.
@@ -214,7 +218,6 @@ void ComparerThread::EnterProcFunc(LockableQueue< HasherThreadOutputData* >* has
                     if (match > citem->maxMatchedVal)
                     {
                         citem->maxMatchedVal = match;
-                        //citem->maxMatchedData = (*it)->myHashData;
 
                         if (citem->maxMatchedVal > dupeThreash)
                         {
@@ -233,7 +236,11 @@ void ComparerThread::EnterProcFunc(LockableQueue< HasherThreadOutputData* >* has
                 }
 
                 if (citem != nullptr)
+                {
+                    //these dont need the arrow data, since they are nto being removed later
+                    citem->myHashData->DeleteArrowData();
                     allComparedItems->push_back(std::move(citem));
+                }
             }
 
         }

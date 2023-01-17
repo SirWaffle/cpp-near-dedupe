@@ -24,14 +24,28 @@
 //resolves the dupe files, writes out to arrow memory mapped files to mimic hugging faces datasets
 //only processes files completed by the loader thread, so we dont operate on the same files at the same time
 
+
+struct DupeItem
+{
+    DupeItem(uint32_t _docId, int64_t _rowNumber)
+        :docId(_docId),
+        rowNumber(_rowNumber)
+    {}
+
+    DupeItem(ComparerThreadOutputData* compareData)
+        :docId(compareData->myHashData->arrowData->docId),
+        rowNumber(compareData->myHashData->arrowData->rowNumber)
+    {}
+
+    uint32_t docId;
+    int64_t rowNumber;
+};
+
+
 struct compare_batchNums_insert {
-    bool operator() (const ComparerThreadOutputData* first, ComparerThreadOutputData* second) const
+    bool operator() (const DupeItem& first, const DupeItem& second) const
     {
-        if (first->myHashData->arrowData->batchNum == second->myHashData->arrowData->batchNum)
-        {
-            return (first->myHashData->arrowData->rowNum < second->myHashData->arrowData->rowNum);
-        }
-        return (first->myHashData->arrowData->batchNum < second->myHashData->arrowData->batchNum);
+        return first.rowNumber < second.rowNumber;
     }
 };
 
@@ -42,7 +56,7 @@ protected:
     std::stop_source m_stop;
 
     //for storing duplicate items by file id
-    std::map<uint32_t, std::set<ComparerThreadOutputData*, compare_batchNums_insert > > fileIdToDuplicate;
+    std::map<uint32_t, std::set<DupeItem, compare_batchNums_insert > > fileIdToDuplicate;
 
     std::filesystem::path baseInPath;
     std::string baseOutPath;
@@ -54,12 +68,24 @@ protected:
 
     uint32_t workChunkSize;
 
+    bool m_validateOutput;
+
 public:
-    DupeResolverThread(std::filesystem::path _baseInPath, std::string _baseOutPath, uint32_t _workChunkSize)
+    DupeResolverThread(std::filesystem::path _baseInPath, std::string _baseOutPath, uint32_t _workChunkSize, bool _validateOutput)
         :baseInPath(_baseInPath),
         baseOutPath(_baseOutPath),
-        workChunkSize(_workChunkSize)
+        workChunkSize(_workChunkSize),
+        m_validateOutput(_validateOutput)
     {
+    }
+
+    ~DupeResolverThread()
+    {
+        for (auto pair : fileIdToDuplicate)
+        {
+            pair.second.clear();
+        }
+        fileIdToDuplicate.clear();
     }
 
     void WaitForFinish()
@@ -82,19 +108,14 @@ public:
         return pendingDuplicates;
     }
 
-    void EnterProcFunc(std::list< ComparerThreadOutputData* >* allComparedItems, 
-        LockableQueue< ComparerThreadOutputData* >* duplicates, 
-        ArrowLoaderThread* arrowLoaderThread,
+    void EnterProcFunc(LockableQueue< ComparerThreadOutputData* >* duplicates, 
         std::vector<std::string>* fileNamesVector)
     {
-        (void*)arrowLoaderThread;
-        (void*)allComparedItems;
 
         std::queue<ComparerThreadOutputData* > workQueue;
         ComparerThreadOutputData* workItem;
 
         //ok, we have a lot of info to work with here. items contain fingerprints for the docs, the doc id, and the batchnum it came from
-        //TODO: verify this is enough to locate the original entry so we can remove it.
         //TODO: theoretically we could work in place and scrub files we already processed... dangerous to destroy data though
         //for now, dump to a new location, but for future tests see about editing in place, once this thing is trustworthy
         while (!m_stop.stop_requested() || duplicates->Length() > 0)
@@ -117,19 +138,21 @@ public:
                 auto docIdList = fileIdToDuplicate.find(workItem->myHashData->arrowData->docId);
                 if (docIdList == fileIdToDuplicate.end())
                 {
-                    fileIdToDuplicate.insert(std::pair{ workItem->myHashData->arrowData->docId, std::set<ComparerThreadOutputData*, compare_batchNums_insert >({ std::move(workItem) }) } );
+                    fileIdToDuplicate.insert(std::pair{ workItem->myHashData->arrowData->docId, std::set<DupeItem, compare_batchNums_insert >({ DupeItem(workItem) }) } );
                 }
                 else
                 {
                     docIdList->second.insert(std::move(workItem));
                 }
+
+                delete workItem;
             }
         }
 
         //we can be super safe and handle removing the dupes after we have finished processing them all...
         //not as fast, but safe. do this for now, then improve it later
         //TODO: perf improvement
-        for (int sourceFileInd = 0; sourceFileInd < fileNamesVector->size(); ++sourceFileInd)
+        for (uint32_t sourceFileInd = 0; sourceFileInd < fileNamesVector->size(); ++sourceFileInd)
         {
             std::string fname = (*fileNamesVector)[sourceFileInd];
 
@@ -192,7 +215,7 @@ public:
 
 
     protected:
-        arrow::Status CopyFileSansDupes(std::string sourcePath, std::string outPath, std::set<ComparerThreadOutputData*, compare_batchNums_insert> sortedDupes)
+        arrow::Status CopyFileSansDupes(std::string sourcePath, std::string outPath, std::set<DupeItem, compare_batchNums_insert> sortedDupes)
         {
             //open the arrow file, stream it in batches, write it in batchs ( if and only if its not in the list of dupes )
 
@@ -230,17 +253,15 @@ public:
                 //calc the actual ronum of the first item
                 if (sortedDupes.size() > 0)
                 {
-                    int64_t dupeRowNumAbsolute = (*sortedDupes.begin())->myHashData->arrowData->batchLineNumOffset;
-                    dupeRowNumAbsolute += (*sortedDupes.begin())->myHashData->arrowData->rowNum;
+                    int64_t dupeRowNumAbsolute = sortedDupes.begin()->rowNumber;
+                    //dupeRowNumAbsolute += (*sortedDupes.begin())->myHashData->arrowData->rowNum;
                     //row num is the offset of the rows loaded from the batch lodaer, plus the actual rownum in that batch
 
                     //error catch:
                     if (batchLineNumOffset > dupeRowNumAbsolute)
                     {
-                        ComparerThreadOutputData* compareData = (*sortedDupes.begin());
-                        std::cout << " missed dupe with vals " << compareData->myHashData->arrowData->batchNum << ", "
-                            << compareData->myHashData->arrowData->batchLineNumOffset << ", "
-                            << compareData->myHashData->arrowData->rowNum << std::endl;
+                        const DupeItem& compareData = (*sortedDupes.begin());
+                        std::cout << " missed dupe with vals " << compareData.rowNumber;
                     }
 
                     std::vector<std::shared_ptr<arrow::RecordBatch>> batches; //use this to start slicing out the parts we want to keep...
@@ -252,15 +273,6 @@ public:
                         //this loops, and slices everything *bnefore* the dupe, and we combine them all together to reassemble the table without dupes
                         while (dupeRowNumAbsolute >= batchLineNumOffset && dupeRowNumAbsolute < batchLineNumOffset + record_batch->num_rows())
                         {
-#ifdef _DEBUG
-                            {
-                                ComparerThreadOutputData* compareData = *sortedDupes.begin();
-                                if (compareData->myHashData->arrowData->sourceFilePath != sourcePath)
-                                {
-                                    std::cout << "pathfile mismatch!" << std::endl;
-                                }
-                            }
-#endif
 #if false //DEBUG_MESSAGES                
                             ComparerThreadOutputData* compareData = *sortedDupes.begin();
                             std::cout << " looking at dupe with vals " << compareData->myHashData->arrowData->batchNum << ", "
@@ -305,8 +317,7 @@ public:
                                 break;
 
                             //continue removing/skipping items in range
-                            dupeRowNumAbsolute = (*sortedDupes.begin())->myHashData->arrowData->batchLineNumOffset;
-                            dupeRowNumAbsolute += (*sortedDupes.begin())->myHashData->arrowData->rowNum;
+                            dupeRowNumAbsolute = sortedDupes.begin()->rowNumber;
                         }
 #if DEBUG_MESSAGES
                         std::cout << "stopped slicing due to dupeabs " << dupeRowNumAbsolute << " is >= batchln " << batchLineNumOffset << " + " << record_batch->num_rows() << std::endl;
@@ -403,35 +414,37 @@ public:
             }
 
 
-#ifdef _DEBUG
-            //verify the data written matches in length and what not
-            std::shared_ptr<arrow::io::RandomAccessFile> input_dbgoutput;
-            ARROW_ASSIGN_OR_RAISE(input_dbgoutput, arrow::io::MemoryMappedFile::Open(outPath, arrow::io::FileMode::READ));
-            ARROW_ASSIGN_OR_RAISE(auto ipc_reader_dbg, arrow::ipc::RecordBatchStreamReader::Open(input_dbgoutput));
-
-            uint32_t batchCount_dbg = 0;
-            uint64_t rowsLoaded_dbg = 0;
-
-            std::shared_ptr<arrow::RecordBatch> record_batch_dbg;
-            arrow::Status dbgStatus = ipc_reader_dbg->ReadNext(&record_batch_dbg);
-            while (dbgStatus == arrow::Status::OK() && record_batch_dbg != NULL)
+            if (m_validateOutput)
             {
-                batchCount_dbg += 1;
-                rowsLoaded_dbg += record_batch_dbg->num_rows();
-                dbgStatus = ipc_reader_dbg->ReadNext(&record_batch_dbg);
-            }
-            std::cout << "   dbg file status: " << dbgStatus.message() << std::endl;
-            std::cout << "   debug check batch count: " << batchCount_dbg << ",  check row count: " << rowsLoaded_dbg << std::endl;
+                //verify the data written matches in length and what not
+                std::shared_ptr<arrow::io::RandomAccessFile> input_dbgoutput;
+                ARROW_ASSIGN_OR_RAISE(input_dbgoutput, arrow::io::MemoryMappedFile::Open(outPath, arrow::io::FileMode::READ));
+                ARROW_ASSIGN_OR_RAISE(auto ipc_reader_dbg, arrow::ipc::RecordBatchStreamReader::Open(input_dbgoutput));
 
-            if (rowsLoaded_dbg != rowsWritten)
-            {
-                std::cout << "ERROR: mismatch between what was written and what was loaded! investigate" << std::endl;
-                std::cout << "       checked file: " << outPath << std::endl << std::endl;
+                uint32_t batchCount_dbg = 0;
+                uint64_t rowsLoaded_dbg = 0;
+
+                std::shared_ptr<arrow::RecordBatch> record_batch_dbg;
+                arrow::Status dbgStatus = ipc_reader_dbg->ReadNext(&record_batch_dbg);
+                while (dbgStatus == arrow::Status::OK() && record_batch_dbg != NULL)
+                {
+                    batchCount_dbg += 1;
+                    rowsLoaded_dbg += record_batch_dbg->num_rows();
+                    dbgStatus = ipc_reader_dbg->ReadNext(&record_batch_dbg);
+                }
+                std::cout << "   dbg file status: " << dbgStatus.message() << std::endl;
+                std::cout << "   debug check batch count: " << batchCount_dbg << ",  check row count: " << rowsLoaded_dbg << std::endl;
+
+                if (rowsLoaded_dbg != rowsWritten)
+                {
+                    std::cout << "ERROR: mismatch between what was written and what was loaded! investigate" << std::endl;
+                    std::cout << "       checked file: " << outPath << std::endl << std::endl;
+                }
+
+                arrow::Status stat = ipc_reader_dbg->Close();
+                stat = input_dbgoutput->Close();
             }
 
-            arrow::Status stat = ipc_reader_dbg->Close();
-            stat = input_dbgoutput->Close();
-#endif
             return arrow::Status::OK();
         }
 
