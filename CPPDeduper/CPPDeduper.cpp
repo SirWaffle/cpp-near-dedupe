@@ -219,9 +219,4 @@ int main(int argc, const char** argv)
     delete arrowLoaderThread;
     delete comparerThread;
     delete dupeResolverThread;
-
-    std::cout << "Press any key to continue" << std::endl;
-    char k;
-    std::cin >> k;
-
 }
