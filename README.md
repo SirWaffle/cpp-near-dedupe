@@ -6,6 +6,7 @@ this project was thrown together in a few days and fueled by large amounts of co
 
 # todo
 - contiguous blocks of hashed values to increase speed (memory access, and better parallelization of loops) of comparison checks using jaccard ( this is the long leg at the moment )
+- work stealing to speed up jaccard compare checks when other threads are less busy
 - better readme
 - more commandline arguments for more options
 - better error checking
