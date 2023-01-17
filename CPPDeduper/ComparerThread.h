@@ -130,9 +130,9 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
 
     while (!stop.stop_requested() || hashedDataQueue->Length() > 0)
     {
-        if (hashedDataQueue->try_pop_range(&workQueue, numberOfInternalThreads, 1ms) == 0)
+        if (hashedDataQueue->try_pop_range(&workQueue, numberOfInternalThreads * 128, 10ms) == 0)
         {
-            std::this_thread::sleep_for(50ms);
+            std::this_thread::sleep_for(25ms);
             continue;
         }
 

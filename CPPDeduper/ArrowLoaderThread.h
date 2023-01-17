@@ -88,7 +88,7 @@ protected:
         {
             std::string& path_to_file = paths_to_file[fileIndex];
 
-            std::cout << "Streaming in from file " << path_to_file  << ", files remaining " << (paths_to_file.size() - fileIndex) << "\n";
+            std::cout << "File: " << (paths_to_file.size() - fileIndex) << " -> Streaming from: " << path_to_file << std::endl;
             arrow::Status status = StreamArrowDataset(path_to_file, fileIndex, batchQueue, maxCapacity, dataColumnName);
         }
     }
@@ -119,6 +119,7 @@ arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, ui
     int64_t lineNumOffset = 0;
     while (true)
     {        
+        std::this_thread::sleep_for(1ms);
         if (batchQueue->Length() >= maxCapacity)
         {
             std::this_thread::sleep_for(5s);

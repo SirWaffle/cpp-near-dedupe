@@ -123,8 +123,6 @@ protected:
 #if DEBUG_MESSAGES
             std::cout << "Processing batch " << batchCount << "  with lineoffset " << batchLineNumOffset << "  and numrows: " << record_batch->num_rows() << std::endl;
 #endif
-            //will need to ahndle having to remove ROWS // or rebuilding the batch without the dupes
-            //TODO: detect which things we want to remove, we know batch + line, so that *should help*
             std::shared_ptr<arrow::RecordBatch> outbatch = record_batch;;
             rowsLoaded += record_batch->num_rows();
 
@@ -355,9 +353,9 @@ protected:
         while (!stop.stop_requested() || duplicates->Length() > 0)
         {
             //snooze
-            if (duplicates->try_pop_range(&workQueue, 64, 1ms) == 0)
+            if (duplicates->try_pop_range(&workQueue, 64, 10ms) == 0)
             {
-                std::this_thread::sleep_for(50ms);
+                std::this_thread::sleep_for(100ms);
                 continue;
             }
 

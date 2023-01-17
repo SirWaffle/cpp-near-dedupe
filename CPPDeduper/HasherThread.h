@@ -51,10 +51,9 @@ protected:
 
             while (!stop.stop_requested() || batchQueueIn->Length() > 0)
             {
-                std::this_thread::sleep_for(1ms);
-                if (batchQueueIn->try_pop_range(&workQueue, chunkSize, 1ms) == 0)
+                if (batchQueueIn->try_pop_range(&workQueue, chunkSize, 10ms) == 0)
                 {
-                    std::this_thread::sleep_for(100ms);
+                    std::this_thread::sleep_for(50ms);
                     continue;
                 }
 

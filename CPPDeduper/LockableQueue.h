@@ -46,6 +46,24 @@ public:
         return count;
     }
 
+    int try_pop_range(std::vector<T>& vec, int maxToTake, std::chrono::milliseconds timeout = 1)
+    {
+        std::unique_lock<std::mutex> lock(mutex);
+
+        if (!populatedNotifier.wait_for(lock, timeout, [this] { return !queue.empty(); }))
+            return 0;
+
+        int count = 0;
+        while (--maxToTake >= 0 && queue.size() > 0)
+        {            
+            vec[count] = std::move(queue.front());
+            ++count;
+            queue.pop();
+        }
+
+        return count;
+    }
+
     int Length()
     {
         return (int)queue.size();

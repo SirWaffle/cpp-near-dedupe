@@ -28,8 +28,8 @@ static constexpr int MAX_RECORDS_LOADED = 4096 * 16; //the higher this is, the h
 static constexpr double JACCARD_EARLY_OUT = 0.5; //speeds up the comparisons by early outting
 
 //thread counts
-static constexpr int NUM_HASHER_THREADS = 4; // 4; //more threads crunch through mroe input faster
-static constexpr uint32_t NUM_INTERNAL_COMPARE_THREADS = 12; //12 is good //speeds up compares via multithreading
+static constexpr int NUM_HASHER_THREADS = 2; // 4; //more threads crunch through mroe input faster
+static constexpr uint32_t NUM_INTERNAL_COMPARE_THREADS = 16; //12 is good //speeds up compares via multithreading
 
 //quick and sloppy lookups of filenames, so we dont have to store in each unit of data
 //saves # of laoded docs * string length of filepaths woth of memory
@@ -48,7 +48,7 @@ static void StatsOutputThread_func(std::stop_source* threadstop,
     auto startStats = std::chrono::high_resolution_clock::now();
     while (!threadstop->stop_requested())
     {
-        std::this_thread::sleep_for(10s);
+        std::this_thread::sleep_for(1s);
         auto curTime = std::chrono::high_resolution_clock::now();
         auto duration = duration_cast<std::chrono::seconds>(curTime - startStats);
         std::cout << "[ " << duration.count() << "s ] Stats:"
