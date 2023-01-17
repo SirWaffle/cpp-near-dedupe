@@ -22,8 +22,9 @@
 * - fix all the really slow stuff in duperesolver, easy perf gains
 */
 
-static constexpr int HASH_LENGTH_SHINGLES = 5; //5 words used per hash
-static constexpr int NUM_HASHES = 256; //256 //number of hashes for comparison
+static constexpr int HASH_LENGTH_SHINGLES = 5; //words used per hash
+static constexpr int NUM_HASHES = 256; //number of hashes for comparison
+
 static constexpr int MAX_RECORDS_LOADED = 4096 * 32; //the higher this is, the higher memory usage can get
 
 //thread counts
