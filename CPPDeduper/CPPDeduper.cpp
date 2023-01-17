@@ -24,6 +24,7 @@
 
 static constexpr int HASH_LENGTH_SHINGLES = 5; //words used per hash
 static constexpr int NUM_HASHES = 256; //number of hashes for comparison
+#define HASH_TYPE uint64_t
 
 static constexpr int MAX_RECORDS_LOADED = 4096 * 32; //the higher this is, the higher memory usage can get
 
@@ -101,31 +102,28 @@ int main(int argc, const char** argv)
     uint32_t numThreads = threadPool.get_thread_count();
 
     //reader thread
-    LockableQueue< ArrowLoaderThreadOutputData* > batchQueue;
     ArrowLoaderThread* arrowLoaderThread = new ArrowLoaderThread(MAX_RECORDS_LOADED);
-    std::future<void> arrowLoaderThreadFuture = threadPool.submit(&ArrowLoaderThread::EnterProcFunc, arrowLoaderThread, fileNamesVector, &batchQueue, dataColumnName);
+    std::future<void> arrowLoaderThreadFuture = threadPool.submit(&ArrowLoaderThread::EnterProcFunc, arrowLoaderThread, fileNamesVector, dataColumnName);
 
     //hasher threads
-    LockableQueue< HasherThreadOutputData* > hashedDataQueue;
-    std::vector< HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES>* > hasherThreads;
+    std::vector< HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>* > hasherThreads;
     BS::multi_future<void> hasherThreadFutures;
 
     for (int i = 0; i < NUM_HASHER_THREADS; ++i)
     {
-        auto hasherThread = new HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES>(2048);
+        auto hasherThread = new HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>(2048);
         hasherThreads.push_back(hasherThread);
 
-        hasherThreadFutures.push_back(threadPool.submit(&HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES>::EnterProcFunc, hasherThread, &batchQueue, &hashedDataQueue));
+        hasherThreadFutures.push_back(threadPool.submit(&HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>::EnterProcFunc, hasherThread, arrowLoaderThread->GetOutputQueuePtr()));
     }
 
     //comparer
-    std::list< ComparerThreadOutputData* > allComparedItems;
-    LockableQueue< ComparerThreadOutputData* > duplicates;
-    ComparerThread* comparerThread = new ComparerThread(true, 4096, &threadPool, std::max(1U, numThreads - baseThreads));
+    ComparerThread<HASH_TYPE>* comparerThread = new ComparerThread<HASH_TYPE>(true, 4096, &threadPool, std::max(1U, numThreads - baseThreads));
 
     //for binary 'dupe or not', we dont need to score, so use the threshval for early out as well
-    std::future<void> comparerThreadFuture = threadPool.submit(&ComparerThread::EnterProcFunc, comparerThread, &hashedDataQueue, &allComparedItems, 
-        &duplicates, /*JACCARD_EARLY_OUT*/ matchThresh, matchThresh);
+    //hashers have a static queue, one shared across them all
+    std::future<void> comparerThreadFuture = threadPool.submit(&ComparerThread<HASH_TYPE>::EnterProcFunc, 
+        comparerThread, hasherThreads[0]->GetOutputQueuePtr(), /*JACCARD_EARLY_OUT*/ matchThresh, matchThresh);
 
     //and as the comparer spits out the dupes, we can start removing them from the datasets...
     DupeResolverThread* dupeResolverThread = new DupeResolverThread(basePath, output, 4096, false);

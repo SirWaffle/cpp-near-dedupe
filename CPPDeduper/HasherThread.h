@@ -4,38 +4,39 @@
 #include "ArrowLoaderThread.h"
 #include "Hashing.h"
 
-struct HasherThreadOutputData
-{
-    HasherThreadOutputData(ArrowLoaderThreadOutputData* _arrowLoaderData, std::unique_ptr<uint32_t[]> _hashes, uint32_t _hashLen)
-        :arrowData(_arrowLoaderData),
-        hashes(std::move(_hashes)),
-        hashLen(_hashLen)
-
-    {}
-
-    ~HasherThreadOutputData()
-    {
-        DeleteArrowData();
-    }
-
-    void DeleteArrowData()
-    {
-        delete arrowData;
-        arrowData = nullptr;
-    }
-
-    ArrowLoaderThreadOutputData* arrowData;
-    std::unique_ptr<uint32_t[]> hashes;
-    uint32_t hashLen;
-};
-
-
-template<int HASH_LEN_SHINGLES, int NUM_HASHES>
+template<int HASH_LEN_SHINGLES, int NUM_HASHES, typename UINT_HASH_TYPE>
 class HasherThread
 {
+public:
+    struct HasherThreadOutputData
+    {
+        HasherThreadOutputData(ArrowLoaderThreadOutputData* _arrowLoaderData, std::unique_ptr<uint32_t[]> _hashes, uint32_t _hashLen)
+            :arrowData(_arrowLoaderData),
+            hashes(std::move(_hashes)),
+            hashLen(_hashLen)
+
+        {}
+
+        ~HasherThreadOutputData()
+        {
+            DeleteArrowData();
+        }
+
+        void DeleteArrowData()
+        {
+            delete arrowData;
+            arrowData = nullptr;
+        }
+
+        ArrowLoaderThreadOutputData* arrowData;
+        std::unique_ptr<UINT_HASH_TYPE[]> hashes;
+        uint32_t hashLen;
+    };
+
 protected:
     std::stop_source m_stop;
     uint32_t readChunkSize;
+    static LockableQueue< HasherThreadOutputData* > hashedDataQueue;
 
 public:
     HasherThread(uint32_t _readChunkSize)
@@ -48,7 +49,12 @@ public:
         m_stop.request_stop();
     }
 
-    void EnterProcFunc(LockableQueue< ArrowLoaderThreadOutputData* >* batchQueueIn, LockableQueue< HasherThreadOutputData* >* hashedDataQueue)
+    LockableQueue< HasherThreadOutputData* >* GetOutputQueuePtr()
+    {
+        return &hashedDataQueue;
+    }
+
+    void EnterProcFunc(LockableQueue< ArrowLoaderThreadOutputData* >* batchQueueIn)
     {
         std::queue<ArrowLoaderThreadOutputData* > workQueue;
         ArrowLoaderThreadOutputData* workItem;
@@ -67,7 +73,7 @@ public:
                 workItem = workQueue.front();
                 workQueue.pop();
 
-                std::unique_ptr<uint32_t[]> hashes;
+                std::unique_ptr<UINT_HASH_TYPE[]> hashes;
                 uint32_t hashLen = MakeFingerprint<HASH_LEN_SHINGLES, NUM_HASHES>(*(workItem->data), &hashes);
                 workItem->DeleteData();
 
