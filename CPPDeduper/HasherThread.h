@@ -23,57 +23,50 @@ template<int HASH_LEN_SHINGLES, int NUM_HASHES>
 class HasherThread
 {
 protected:
-    std::thread* m_thread = nullptr;
     std::stop_source m_stop;
+    uint32_t readChunkSize;
 
 public:
-    HasherThread()
+    HasherThread(uint32_t _readChunkSize)
+        :readChunkSize(_readChunkSize)
     {
-    }
-
-    void Start(LockableQueue< ArrowLoaderThreadOutputData* >* batchQueueIn, LockableQueue< HasherThreadOutputData* >* hashedDataQueue, int chunkSize)
-    {
-        m_thread = new std::thread(&HasherThread::EnterProcFunc, this, m_stop, batchQueueIn, hashedDataQueue, chunkSize);
     }
 
     void WaitForFinish()
     {
         m_stop.request_stop();
-        m_thread->join();
     }
 
-protected:
-    void EnterProcFunc(std::stop_source stop, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueueIn,
-        LockableQueue< HasherThreadOutputData* >* hashedDataQueue, int chunkSize)
+    void EnterProcFunc(LockableQueue< ArrowLoaderThreadOutputData* >* batchQueueIn, LockableQueue< HasherThreadOutputData* >* hashedDataQueue)
+    {
+        std::queue<ArrowLoaderThreadOutputData* > workQueue;
+        ArrowLoaderThreadOutputData* workItem;
+
+        while (!m_stop.stop_requested() || batchQueueIn->Length() > 0)
         {
-            std::queue<ArrowLoaderThreadOutputData* > workQueue;
-            ArrowLoaderThreadOutputData* workItem;
-
-            while (!stop.stop_requested() || batchQueueIn->Length() > 0)
+            if (batchQueueIn->try_pop_range(&workQueue, readChunkSize, 10ms) == 0)
             {
-                if (batchQueueIn->try_pop_range(&workQueue, chunkSize, 10ms) == 0)
-                {
-                    std::this_thread::sleep_for(50ms);
-                    continue;
-                }
+                std::this_thread::sleep_for(100ms);
+                continue;
+            }
 
-                while (workQueue.size() > 0)
-                {
-                    //loop over the batchQueueIn, grab some items, hash em, stuff em in the hashedDataQueue
-                    workItem = workQueue.front();
-                    workQueue.pop();
-    
-                    std::unique_ptr<uint32_t[]> hashes;
-                    uint32_t hashLen = MakeFingerprint<HASH_LEN_SHINGLES, NUM_HASHES>(*(workItem->data), &hashes);
-                    delete(workItem->data);
-                    workItem->data = nullptr;
+            while (workQueue.size() > 0)
+            {
+                //loop over the batchQueueIn, grab some items, hash em, stuff em in the hashedDataQueue
+                workItem = workQueue.front();
+                workQueue.pop();
 
-                    //push into hashedQueue
-                    HasherThreadOutputData* hashed = new HasherThreadOutputData(workItem, std::move(hashes), hashLen);
-                    hashed->arrowData = workItem;                            
+                std::unique_ptr<uint32_t[]> hashes;
+                uint32_t hashLen = MakeFingerprint<HASH_LEN_SHINGLES, NUM_HASHES>(*(workItem->data), &hashes);
+                delete(workItem->data);
+                workItem->data = nullptr;
 
-                    hashedDataQueue->push(std::move(hashed));                   
-                }
+                //push into hashedQueue
+                HasherThreadOutputData* hashed = new HasherThreadOutputData(workItem, std::move(hashes), hashLen);
+                hashed->arrowData = workItem;
+
+                hashedDataQueue->push(std::move(hashed));
             }
         }
+    }
 };

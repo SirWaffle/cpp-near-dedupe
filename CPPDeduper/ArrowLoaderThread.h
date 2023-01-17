@@ -43,25 +43,16 @@ struct ArrowLoaderThreadOutputData
 class ArrowLoaderThread
 {
 protected:
-    std::thread* m_thread = nullptr;
     uint32_t fileIndex = 0;
-
     uint32_t totalbatches = 0;
     uint64_t totaldocs = 0;
 
+    uint32_t maxLoadedRecordsQueued;
+
 public:
-    ArrowLoaderThread()
+    ArrowLoaderThread(uint32_t _maxLoadedRecordsQueued)
+        :maxLoadedRecordsQueued(_maxLoadedRecordsQueued)
     {
-    }
-
-    void Start(std::vector<std::string> paths_to_file, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, int maxCapacity, std::string dataColumnName)
-    {
-        m_thread = new std::thread(&ArrowLoaderThread::EnterProcFunc, this, paths_to_file, batchQueue, maxCapacity, dataColumnName);
-    }
-
-    void WaitForFinish()
-    {
-        m_thread->join();
     }
 
     //returns the index of the file vector of the file we are processing
@@ -81,18 +72,18 @@ public:
         return totaldocs;
     }
 
-protected:
-    void EnterProcFunc(std::vector<std::string> paths_to_file, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, int maxCapacity, std::string dataColumnName)
+    void EnterProcFunc(std::vector<std::string> paths_to_file, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, std::string dataColumnName)
     {
         for(fileIndex = 0; fileIndex < paths_to_file.size(); ++fileIndex)
         {
             std::string& path_to_file = paths_to_file[fileIndex];
 
             std::cout << "File: " << (paths_to_file.size() - fileIndex) << " -> Streaming from: " << path_to_file << std::endl;
-            arrow::Status status = StreamArrowDataset(path_to_file, fileIndex, batchQueue, maxCapacity, dataColumnName);
+            arrow::Status status = StreamArrowDataset(path_to_file, fileIndex, batchQueue, maxLoadedRecordsQueued, dataColumnName);
         }
     }
 
+protected:
     arrow::Status StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue
         , int maxCapacity, std::string dataColumnName);
 };
@@ -118,11 +109,10 @@ arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, ui
     int batchNum = 0;
     int64_t lineNumOffset = 0;
     while (true)
-    {        
-        std::this_thread::sleep_for(1ms);
+    { 
         if (batchQueue->Length() >= maxCapacity)
         {
-            std::this_thread::sleep_for(5s);
+            std::this_thread::sleep_for(200ms);
         }
         else
         {

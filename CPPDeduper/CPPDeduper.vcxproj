@@ -143,6 +143,7 @@
     <ClInclude Include="isalphanum.h" />
     <ClInclude Include="Jaccard.h" />
     <ClInclude Include="LockableQueue.h" />
+    <ClInclude Include="ThreadPool.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

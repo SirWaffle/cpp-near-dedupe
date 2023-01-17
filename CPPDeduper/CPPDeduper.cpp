@@ -13,6 +13,7 @@
 #include "HasherThread.h"
 #include "ArrowLoaderThread.h"
 #include "LockableQueue.h"
+#include "ThreadPool.h"
 
 
 /*
@@ -28,38 +29,7 @@ static constexpr int MAX_RECORDS_LOADED = 4096 * 16; //the higher this is, the h
 static constexpr double JACCARD_EARLY_OUT = 0.5; //speeds up the comparisons by early outting
 
 //thread counts
-static constexpr int NUM_HASHER_THREADS = 2; // 4; //more threads crunch through mroe input faster
-static constexpr uint32_t NUM_INTERNAL_COMPARE_THREADS = 16; //12 is good //speeds up compares via multithreading
-
-//quick and sloppy lookups of filenames, so we dont have to store in each unit of data
-//saves # of laoded docs * string length of filepaths woth of memory
-static std::vector<std::string> fileNamesVector;
-
-
-//some stats to watch as the thing crunches. values are questionable since im
-//no tbothering with thread saftey or anything, its all reads so w/e
-static void StatsOutputThread_func(std::stop_source* threadstop,
-    LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, 
-    LockableQueue< HasherThreadOutputData* >* hashedDataQueue, 
-    std::list< ComparerThreadOutputData* >* allComparedItems,
-    ArrowLoaderThread* arrowLoaderThread,
-    DupeResolverThread* dupeResolverThread)
-{
-    auto startStats = std::chrono::high_resolution_clock::now();
-    while (!threadstop->stop_requested())
-    {
-        std::this_thread::sleep_for(1s);
-        auto curTime = std::chrono::high_resolution_clock::now();
-        auto duration = duration_cast<std::chrono::seconds>(curTime - startStats);
-        std::cout << "[ " << duration.count() << "s ] Stats:"
-            << "   Docs Loaded: " << arrowLoaderThread->GetTotalDocs()
-            << "   Pending Hash: " << batchQueue->Length()
-            << "   Pending Jaccard: " << hashedDataQueue->Length()
-            << "   Unique Docs: " << allComparedItems->size()
-            << "   Dupe Docs: " << dupeResolverThread->PendingDuplicates() 
-            << std::endl;
-    }
-}
+static constexpr int NUM_HASHER_THREADS = 4; // 4; //more threads crunch through mroe input faster
 
 
 
@@ -88,6 +58,10 @@ int main(int argc, const char** argv)
 
     std::cout << "Running with params: " << basePath << ", " << extension << ", " << dataColumnName << ", " << matchThreash << ", " << output << std::endl;
     std::cout << "Scanning for " << extension << " files in " << basePath;
+
+    //quick and sloppy lookups of filenames, so we dont have to store in each unit of data
+    //saves # of loaded docs * string length of filepaths woth of memory
+    static std::vector<std::string> fileNamesVector;
 
     for (auto itEntry = std::filesystem::recursive_directory_iterator(basePath);
         itEntry != std::filesystem::recursive_directory_iterator();
@@ -121,64 +95,133 @@ int main(int argc, const char** argv)
     //start threads
     //======
 
+    //minimum threads...
+    //1 loader thread, x hasher threads, 1 comparer thread, 1 output thread
+    //the rest will operate as comparer workers
+    uint32_t baseThreads = 3 + NUM_HASHER_THREADS;
+    BS::thread_pool threadPool(baseThreads, 0);
+    uint32_t numThreads = threadPool.get_thread_count();
+
     //reader thread
     LockableQueue< ArrowLoaderThreadOutputData* > batchQueue;
-    ArrowLoaderThread arrowLoaderThread;
-    arrowLoaderThread.Start(fileNamesVector, &batchQueue, MAX_RECORDS_LOADED, dataColumnName);
+    ArrowLoaderThread* arrowLoaderThread = new ArrowLoaderThread(MAX_RECORDS_LOADED);
+    std::future<void> arrowLoaderThreadFuture = threadPool.submit(&ArrowLoaderThread::EnterProcFunc, arrowLoaderThread, fileNamesVector, &batchQueue, dataColumnName);
 
     //hasher threads
     LockableQueue< HasherThreadOutputData* > hashedDataQueue;
     std::vector< HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES>* > hasherThreads;
+    BS::multi_future<void> hasherThreadFutures;
+
     for (int i = 0; i < NUM_HASHER_THREADS; ++i)
     {
-        auto hasherThread = new HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES>();
-        hasherThread->Start(&batchQueue, &hashedDataQueue, 64);
+        auto hasherThread = new HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES>(2048);
         hasherThreads.push_back(hasherThread);
+
+        hasherThreadFutures.push_back(threadPool.submit(&HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES>::EnterProcFunc, hasherThread, &batchQueue, &hashedDataQueue));
     }
 
     //comparer
     std::list< ComparerThreadOutputData* > allComparedItems;
     LockableQueue< ComparerThreadOutputData* > duplicates;
-    ComparerThread comparerThread(true, NUM_INTERNAL_COMPARE_THREADS);
-    comparerThread.Start(&hashedDataQueue, &allComparedItems, &duplicates, 64, JACCARD_EARLY_OUT, matchThreash, NUM_HASHES);
+    ComparerThread* comparerThread = new ComparerThread(true, 4096, &threadPool, std::max(1U, numThreads - baseThreads));
+    std::future<void> comparerThreadFuture = threadPool.submit(&ComparerThread::EnterProcFunc, comparerThread, &hashedDataQueue, &allComparedItems, &duplicates, 64, JACCARD_EARLY_OUT, matchThreash, NUM_HASHES);
 
     //and as the comparer spits out the dupes, we can start removing them from the datasets...
-    //or something... not entirely sure how i want to handle this yet...
-    DupeResolverThread dupeResolverThread(basePath, output);
-    dupeResolverThread.Start(&allComparedItems, &duplicates, &arrowLoaderThread, &fileNamesVector);
+    DupeResolverThread* dupeResolverThread = new DupeResolverThread(basePath, output, 4096);
+    std::future<void> dupeResolverThreadFuture = threadPool.submit(&DupeResolverThread::EnterProcFunc, dupeResolverThread, &allComparedItems , &duplicates, arrowLoaderThread, &fileNamesVector);
     
-    //lets start a stats out thread so we dont get bored
-    std::stop_source statThreadStopper;
-    std::thread statsThread(StatsOutputThread_func, &statThreadStopper, &batchQueue, &hashedDataQueue, &allComparedItems, &arrowLoaderThread, &dupeResolverThread);
 
-    //reader thread is first to finish in this pipeline
-    arrowLoaderThread.WaitForFinish();
+    //wait for tasks to complete
+    //guly state thing until i sort out a better wau
+    int state = 0;
+    uint32_t jaccardThreads = comparerThread->GetWorkerThreadCount();
+    while (true)
+    {     
+        std::this_thread::sleep_for(10s);
 
-    //hashers are next to finish
-    for (int i = 0; i < NUM_HASHER_THREADS; ++i)
-    {
-        hasherThreads[i]->WaitForFinish();
-        delete hasherThreads[i];
-        hasherThreads[i] = nullptr;
+        if (state == 0)
+        {
+            //reader thread is first to finish in this pipeline
+            if (arrowLoaderThreadFuture.wait_for(0ms) == std::future_status::ready)
+            {
+                comparerThread->IncreaseMaxWorkerThreads(1);
+                jaccardThreads = comparerThread->GetWorkerThreadCount();
+
+                state++;
+                //hashers are next to finish
+                //tell them all their parent task has finished
+                for (int i = 0; i < NUM_HASHER_THREADS; ++i)
+                    hasherThreads[i]->WaitForFinish();
+            }
+        }
+        else if (state == 1)
+        {
+            if (hasherThreadFutures.wait_for(0ms) == std::future_status::ready)
+            {
+                for (int i = 0; i < NUM_HASHER_THREADS; ++i)
+                    delete hasherThreads[i];
+
+                comparerThread->IncreaseMaxWorkerThreads(NUM_HASHER_THREADS);
+                jaccardThreads = comparerThread->GetWorkerThreadCount();
+
+                state++;
+                //comparer now, tell it to finish...
+                comparerThread->WaitForFinish();
+            }
+        }
+        else if (state == 2)
+        {
+            if (comparerThreadFuture.wait_for(0ms) == std::future_status::ready)
+            {
+                state++;
+                //and the final peice, writting out the new datasets
+                dupeResolverThread->WaitForFinish();
+            }
+        }
+        else if (state == 3)
+        {
+            if (dupeResolverThreadFuture.wait_for(0ms) == std::future_status::ready)
+                break; //done!
+        }
+
+        auto curTime = std::chrono::high_resolution_clock::now();
+        auto duration = duration_cast<std::chrono::seconds>(curTime - startTime);
+        std::cout << "[ " << duration.count() << "s ] Stats:";
+
+        if(state < 1)
+            std::cout << "   [1]Docs Loading..." << arrowLoaderThread->GetTotalDocs();
+        else
+            std::cout << "   [0]Docs Loaded: " << arrowLoaderThread->GetTotalDocs();
+
+        if(state < 2)
+            std::cout << "   [" << NUM_HASHER_THREADS << "] Pending Hash..." << batchQueue.Length();
+        else
+            std::cout << "   [0]hashing Done!";
+
+        std::cout << "   [" << jaccardThreads << "] Pending Jaccard..." << hashedDataQueue.Length();
+        std::cout << "   Unique Docs: " << allComparedItems.size();
+        std::cout << "   Dupe Docs: " << dupeResolverThread->PendingDuplicates();
+        std::cout << std::endl;
     }
-
-    //comparer now
-    comparerThread.WaitForFinish();
-
-    //and the final peice, writting out the new datasets
-    dupeResolverThread.WaitForFinish();
-
 
     auto stopTime = std::chrono::high_resolution_clock::now();
 
-    statThreadStopper.request_stop();
-    statsThread.join();
-
     //aaaand done
-    auto duration = duration_cast<std::chrono::microseconds>(stopTime - startTime);
-    std::cout << "Finished in " << (uint64_t)(duration.count() / 1000) << "ms" << std::endl;
+    auto duration = duration_cast<std::chrono::seconds>(stopTime - startTime);
+    std::cout << "Finished in " << (uint64_t)(duration.count()) << "s" << std::endl;
     std::cout << "Found " << allComparedItems.size() << " Unique documents" << std::endl;
-    std::cout << "Found " << dupeResolverThread.TotalDupes() << " duplicates, and removed " << dupeResolverThread.TotalDupesRemoved() << std::endl;
-    std::cout << "Total batches: " << arrowLoaderThread.GetTotalBatches() << " and total docs: " << arrowLoaderThread.GetTotalDocs() << std::endl;
+    std::cout << "Found " << dupeResolverThread->TotalDupes() << " duplicates, and removed " << dupeResolverThread->TotalDupesRemoved() << std::endl;
+    std::cout << "Total batches: " << arrowLoaderThread->GetTotalBatches() << " and total docs: " << arrowLoaderThread->GetTotalDocs() << std::endl;
+
+
+    //clean up...
+    threadPool.reset(0);
+    delete arrowLoaderThread;
+    delete comparerThread;
+    delete dupeResolverThread;
+
+    std::cout << "Press any key to continue" << std::endl;
+    char k;
+    std::cin >> k;
 
 }

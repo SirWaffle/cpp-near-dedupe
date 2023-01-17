@@ -7,40 +7,24 @@
 #include <list>
 #include <thread>
 
+#include "ThreadPool.h"
 
 
 struct ComparerThreadOutputData
 {
     HasherThreadOutputData* myHashData;
     double maxMatchedVal;
-    //HasherThreadOutputData* maxMatchedData;
 };
 
-//TODO: reuse the internal threads for speedup PERF
 class InternalComparerThread
 {
 protected:
-    std::thread* m_thread = nullptr;
-    std::stop_source m_stopCompare;
     double maxMatchVal = 0.0;
     ComparerThreadOutputData* item = nullptr;
-    ComparerThreadOutputData* dupeItem = nullptr;
 
 public:
     InternalComparerThread()
     {
-    }
-
-    void Start(std::list< ComparerThreadOutputData* >* allComparedItems, double earlyOut, double dupeThreash, int numHashes, ComparerThreadOutputData* citem)
-    {
-        item = citem;
-        m_thread = new std::thread(&InternalComparerThread::EnterProcFunc, this, m_stopCompare, allComparedItems, earlyOut, dupeThreash, numHashes, citem);
-    }
-
-    void WaitForFinish()
-    {
-        m_stopCompare.request_stop();
-        m_thread->join();
     }
 
     double GetMaxMatchVal()
@@ -53,16 +37,13 @@ public:
         return item;
     }
 
-    ComparerThreadOutputData* GetDupeItem()
+    void EnterProcFunc(std::list< ComparerThreadOutputData* >* allComparedItems, double earlyOut, double dupeThreash, int numHashes, ComparerThreadOutputData* citem)
     {
-        return dupeItem;
-    }
+        maxMatchVal = 0.0;
+        item = citem;
 
-protected:
-    void EnterProcFunc(std::stop_source stop, std::list< ComparerThreadOutputData* >* allComparedItems, double earlyOut, double dupeThreash, int numHashes, ComparerThreadOutputData* citem)
-    {
         //compare incoming against all others, update the its max value.
-//this wilkl prioritize removing later documents that match, not the first one
+        //this will prioritize removing later documents that match, not the first one
         for (auto it = allComparedItems->begin(); it != allComparedItems->end() && citem->maxMatchedVal < dupeThreash; it++)
         {
             double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
@@ -71,7 +52,6 @@ protected:
             if (match > maxMatchVal)
             {
                 maxMatchVal = match;
-                dupeItem = (*it);
 
                 if (citem->maxMatchedVal >= dupeThreash)
                 {
@@ -87,50 +67,56 @@ class ComparerThread
 {
 protected:
     bool m_throwOutDupes;
-    std::thread* m_thread = nullptr;
-    std::stop_source m_stopCompare;
-    uint32_t numberOfInternalThreads;
+    std::stop_source m_stop;
+    std::atomic<uint32_t> maxThreadWorkers;
+    BS::thread_pool* threadPool;
+    uint32_t workChunkSize;
 
 public:
-    ComparerThread(bool throwOutDupes, uint32_t interalThreads)
+    ComparerThread(bool throwOutDupes, uint32_t _workChunkSize, BS::thread_pool* _threadPool, uint32_t maxThreadWorkers = 0)
         :m_throwOutDupes(throwOutDupes),
-        numberOfInternalThreads(interalThreads)
+        maxThreadWorkers(maxThreadWorkers),
+        threadPool(_threadPool),
+        workChunkSize(_workChunkSize)
     {
     }
 
-    void Start(LockableQueue< HasherThreadOutputData* >* hashedDataQueue, std::list< ComparerThreadOutputData* >* allComparedItems, LockableQueue< ComparerThreadOutputData* >* duplicateItems, int chunkSize, double earlyOut, double dupeThreash, int numHashes)
+    void IncreaseMaxWorkerThreads(int amt)
     {
-        m_thread = new std::thread(&ComparerThread::EnterProcFunc, this, m_stopCompare, hashedDataQueue, allComparedItems, duplicateItems, chunkSize, earlyOut, dupeThreash, numHashes);
+        maxThreadWorkers.fetch_add(amt);
+    }
+
+    uint32_t GetWorkerThreadCount()
+    {
+        return maxThreadWorkers.load();
     }
 
     void WaitForFinish()
     {
-        m_stopCompare.request_stop();
-        m_thread->join();
+        m_stop.request_stop();
     }
 
-protected:
-    void EnterProcFunc(std::stop_source stop, LockableQueue< HasherThreadOutputData* >* hashedDataQueue,
+    void EnterProcFunc(LockableQueue< HasherThreadOutputData* >* hashedDataQueue,
         std::list< ComparerThreadOutputData* >* allComparedItems, 
         LockableQueue< ComparerThreadOutputData* >* duplicateItems, 
         int chunkSize,
         double earlyOut, double dupeThreash, int numHashes);
 };
 
-void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherThreadOutputData* >* hashedDataQueue, 
+void ComparerThread::EnterProcFunc(LockableQueue< HasherThreadOutputData* >* hashedDataQueue, 
         std::list< ComparerThreadOutputData* >* allComparedItems, LockableQueue< ComparerThreadOutputData* >* duplicateItems,
         int chunkSize, double earlyOut, double dupeThreash, int numHashes)
 {
-    std::vector< InternalComparerThread* > internalCompareThread(numberOfInternalThreads, nullptr);
+    std::vector< InternalComparerThread > internalCompareThread;
     chunkSize = chunkSize; //do nothing, unreferenced param warning
 
     //this guy needs to compare each incoming hashed data against all prexisting data, gonna be slow.
     std::queue<HasherThreadOutputData* > workQueue;
     HasherThreadOutputData* workItem;
 
-    while (!stop.stop_requested() || hashedDataQueue->Length() > 0)
+    while (!m_stop.stop_requested() || hashedDataQueue->Length() > 0)
     {
-        if (hashedDataQueue->try_pop_range(&workQueue, numberOfInternalThreads * 128, 10ms) == 0)
+        if (hashedDataQueue->try_pop_range(&workQueue, workChunkSize, 10ms) == 0)
         {
             std::this_thread::sleep_for(25ms);
             continue;
@@ -139,13 +125,13 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
         while (workQueue.size() > 0)
         {
             //early out since no checks
-            if (allComparedItems->size() == 0)
+            if (allComparedItems->size() == 0) [[unlikely]]
             {
                 workItem = workQueue.front();
                 workQueue.pop();
 
                 ComparerThreadOutputData* citem = new ComparerThreadOutputData();
-                //citem->maxMatchedData = nullptr;
+
                 citem->maxMatchedVal = 0.0;
                 citem->myHashData = workItem;
 
@@ -153,39 +139,40 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
                 continue;
             }
 
-            //spread the work of comparing across threads..            
-            for (size_t i = 0; i < numberOfInternalThreads && workQueue.size() > 0; ++i)
+            //spread the work of comparing across threads..  
+            uint32_t threadsToUse = maxThreadWorkers.load();
+
+            if (internalCompareThread.size() < threadsToUse) [[unlikely]]
+                internalCompareThread.resize(threadsToUse);
+
+            BS::multi_future<void> internalCompareThreadFutures;
+
+            for (size_t i = 0; i < threadsToUse && workQueue.size() > 0; ++i)
             {
                 workItem = workQueue.front();
                 workQueue.pop();
 
                 ComparerThreadOutputData* citem = new ComparerThreadOutputData();
-                //citem->maxMatchedData = nullptr;
                 citem->maxMatchedVal = 0.0;
                 citem->myHashData = workItem;
 
-                auto thread = new InternalComparerThread();
-                thread->Start(allComparedItems, earlyOut, dupeThreash, numHashes, std::move(citem));
-                internalCompareThread[i] = thread;
+                //thread->Start(allComparedItems, earlyOut, dupeThreash, numHashes, std::move(citem));                
+                internalCompareThreadFutures.push_back(
+                    threadPool->submit(&InternalComparerThread::EnterProcFunc, 
+                    &internalCompareThread[i], allComparedItems,
+                    earlyOut, dupeThreash, numHashes, std::move(citem))
+                );
             }
 
-            //let them crunch and wait for all to finish
-            for (size_t i = 0; i < internalCompareThread.size(); ++i)
-            {
-                if(internalCompareThread[i] != nullptr)
-                    internalCompareThread[i]->WaitForFinish();
-            }
+            //wait for worker threads
+            internalCompareThreadFutures.wait();
 
             //run through each and look at result, if its a dupe, pass it to dupes, if its not, we need to compare all the
             std::list<ComparerThreadOutputData* > potenialKeepers;
-            for (size_t i = 0; i < internalCompareThread.size(); ++i)
+            for (size_t i = 0; i < internalCompareThreadFutures.size(); ++i)
             {
-                if (internalCompareThread[i] == nullptr)
-                    continue;
-
-                double match = internalCompareThread[i]->GetMaxMatchVal();
-                ComparerThreadOutputData* citem = internalCompareThread[i]->GetComparerItem();
-                ComparerThreadOutputData* dupeItem = internalCompareThread[i]->GetDupeItem();
+                double match = internalCompareThread[i].GetMaxMatchVal();
+                ComparerThreadOutputData* citem = internalCompareThread[i].GetComparerItem();
 
                 if (match >= dupeThreash)
                 {
@@ -206,19 +193,8 @@ void ComparerThread::EnterProcFunc(std::stop_source stop, LockableQueue< HasherT
                     }
                 }
 
-
                 if (citem != nullptr)
                     potenialKeepers.push_back(std::move(citem));
-            }
-
-            //delete threads for now TODO: PERF - reuse
-            for (size_t i = 0; i < internalCompareThread.size(); ++i)
-            {
-                if (internalCompareThread[i] != nullptr)
-                {
-                    delete internalCompareThread[i];
-                    internalCompareThread[i] = nullptr;
-                }
             }
 
             //now, compare all potential keepers against each other...
