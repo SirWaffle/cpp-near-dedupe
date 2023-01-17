@@ -62,6 +62,7 @@ public:
             if (match > maxMatchVal)
             {
                 maxMatchVal = match;
+                citem->maxMatchedVal = match;
 
                 if (citem->maxMatchedVal >= dupeThreash)
                 {
