@@ -5,13 +5,11 @@ dedupes arrow datasets ( IPC .arrow db's at the moment) using minhash / jaccard 
 this project was thrown together in a few days and fueled by large amounts of coffee, so things are getting cleaned / fixed / improved, and there are likely bugs and other oddities in the code 
 
 # todo
-- thread pools
 - contiguous blocks of hashed values
 - better readme
 - more commandline arguments for more options
 - better error checking
 - handle various arrow formats
-- more perf and ram optimizations
 - handle different CPU intrinsics for more hardware support
 - unit tests
 - check for file write permissions on output folder *before* its ready to write out at end of crunching
@@ -48,8 +46,28 @@ sudo make release
 - windows/linux
 
 ```
-executing the program with no cmd args will display the expected cmd args
+executing the program with no cmd args will display the expected cmd args.
+
+usage: 
+CPPDeduper "\path\to\dirWith\arrowIPCdatasets\inSubfolders" "fileExtensionOfArrowIPCDatasets" "dataColumnName" dupeThreshold "outdir\where\nondupes\are\saved"
+
+
+NOTE: there is no parameter for hash size or n-gram size. they are compiled in for optimization, and default to n-gram size of 5, and 256 finger print hashes
+they can be modified in code on these lines:
+static constexpr int HASH_LENGTH_SHINGLES = 5; //words used per hash
+static constexpr int NUM_HASHES = 256; //number of hashes for comparison
+
+
+
+sample windows commandline:
+
+CPPDeduper "D:\\datasets\\folderWithManySubfolders" ".arrow" "text" 0.7 "d:\\dedupOut"
+
+sample linux:
+./CPPDeduper "/mnt/d/datasets/folderWithManySubfolders" ".arrow" "text" 0.7 "/mnt/d/carp/dedupOut"
+
 ```
+
 
 # bugs and issues
 - theres very little error handling at the moment, so it can be touchy
