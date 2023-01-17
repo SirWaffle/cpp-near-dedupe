@@ -146,30 +146,15 @@ public:
         return item;
     }
 
-    void EnterProcFunc(std::list< ComparerThreadOutputData* >* allComparedItems, double earlyOut, double dupeThreash, ComparerThreadOutputData* citem)
+    bool EnterProcFunc(hashBlock& allComparedItems, double earlyOut, double dupeThreash, ComparerThreadOutputData* citem)
     {
-        maxMatchVal = 0.0;
-        item = citem;
-
-        //compare incoming against all others, update the its max value.
-        //this will prioritize removing later documents that match, not the first one
-        for (auto it = allComparedItems->begin(); it != allComparedItems->end() && citem->maxMatchedVal < dupeThreash; it++)
+        for (int i = 0; i < hashBlock.size() && request_stop == false; i++)
         {
-            double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
-                (*it)->myHashData->hashes.get(), (*it)->myHashData->hashLen,
-                earlyOut);
-            if (match > maxMatchVal)
-            {
-                maxMatchVal = match;
-                citem->maxMatchedVal = match;
-
-                if (citem->maxMatchedVal >= dupeThreash)
-                {
-                    //we are done
-                    return;
-                }
-            }
+            double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen, &hashBlock[i].hashes), hashBlock[i].hashLen, earlyOut);
+            if (match > dupeThreash)
+                return true;
         }  
+        return false;
     }
 };
 
