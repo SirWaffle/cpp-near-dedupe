@@ -10,70 +10,57 @@
 #include "ThreadPool.h"
 
 
-struct ComparerThreadOutputData
+struct CompareThreadDupeItem
 {
-    ComparerThreadOutputData(HasherThreadOutputData* _myHashData, double _maxMatchedVal)
-        :myHashData(_myHashData)
-        ,maxMatchedVal(_maxMatchedVal)
+    CompareThreadDupeItem(uint32_t _docId, int64_t _rowNumber)
+        :docId(_docId),
+        rowNumber(_rowNumber)
     {}
 
-    ~ComparerThreadOutputData()
+    uint32_t docId;
+    int64_t rowNumber;
+};
+
+
+template<typename UINT_HASH_TYPE>
+struct CompareItem
+{
+    CompareItem(HasherThreadOutputData< UINT_HASH_TYPE>* _myHashData, double _maxMatchedVal)
+        :myHashData(_myHashData)
+    {}
+
+    ~CompareItem()
     {
         delete myHashData;
     }
 
-    HasherThreadOutputData* myHashData;
-    double maxMatchedVal;
+    HasherThreadOutputData< UINT_HASH_TYPE>* myHashData;
 };
 
-class InternalComparerThread
+
+
+template<typename UINT_HASH_TYPE>
+std::pair< CompareItem<UINT_HASH_TYPE>*, bool> WorkThreadFunc(std::list< CompareItem<UINT_HASH_TYPE>* >& allComparedItems, double earlyOut, double dupeThreash, CompareItem<UINT_HASH_TYPE>* citem)
 {
-protected:
-    double maxMatchVal = 0.0;
-    ComparerThreadOutputData* item = nullptr;
-
-public:
-    InternalComparerThread()
+    //compare incoming against all others, update the its max value.
+    //this will prioritize removing later documents that match, not the first one
+    for (auto it = allComparedItems.begin(); it != allComparedItems.end(); it++)
     {
-    }
+        double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
+            (*it)->myHashData->hashes.get(), (*it)->myHashData->hashLen,
+            earlyOut);
 
-    double GetMaxMatchVal()
-    {
-        return maxMatchVal;
-    }
-
-    ComparerThreadOutputData* GetComparerItem()
-    {
-        return item;
-    }
-
-    void EnterProcFunc(std::list< ComparerThreadOutputData* >* allComparedItems, double earlyOut, double dupeThreash, ComparerThreadOutputData* citem)
-    {
-        maxMatchVal = 0.0;
-        item = citem;
-
-        //compare incoming against all others, update the its max value.
-        //this will prioritize removing later documents that match, not the first one
-        for (auto it = allComparedItems->begin(); it != allComparedItems->end() && citem->maxMatchedVal < dupeThreash; it++)
+        if (match >= dupeThreash)
         {
-            double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
-                (*it)->myHashData->hashes.get(), (*it)->myHashData->hashLen,
-                earlyOut);
-            if (match > maxMatchVal)
-            {
-                maxMatchVal = match;
-                citem->maxMatchedVal = match;
-
-                if (citem->maxMatchedVal >= dupeThreash)
-                {
-                    //we are done
-                    return;
-                }
-            }
-        }  
+            //we are done
+            return std::pair< CompareItem<UINT_HASH_TYPE>*, bool>(citem, true);
+        }
     }
-};
+    return std::pair< CompareItem<UINT_HASH_TYPE>*, bool>(citem, false);
+}
 
+
+template<typename UINT_HASH_TYPE>
 class ComparerThread
 {
 protected:
@@ -83,6 +70,9 @@ protected:
     BS::thread_pool* threadPool;
     uint32_t workChunkSize;
 
+    std::list< CompareItem<UINT_HASH_TYPE>* > uniqueItems;
+    LockableQueue< CompareThreadDupeItem* > duplicateItems;
+
 public:
     ComparerThread(bool throwOutDupes, uint32_t _workChunkSize, BS::thread_pool* _threadPool, uint32_t maxThreadWorkers = 0)
         :m_throwOutDupes(throwOutDupes),
@@ -90,6 +80,15 @@ public:
         threadPool(_threadPool),
         workChunkSize(_workChunkSize)
     {
+    }
+
+    ~ComparerThread()
+    {
+        while (uniqueItems.size() > 0)
+        {
+            delete uniqueItems.front();
+            uniqueItems.pop_front();
+        }
     }
 
     void IncreaseMaxWorkerThreads(int amt)
@@ -107,143 +106,119 @@ public:
         m_stop.request_stop();
     }
 
-    void EnterProcFunc(LockableQueue< HasherThreadOutputData* >* hashedDataQueue,
-        std::list< ComparerThreadOutputData* >* allComparedItems, 
-        LockableQueue< ComparerThreadOutputData* >* duplicateItems, 
-        double earlyOut, double dupeThreash);
-};
-
-void ComparerThread::EnterProcFunc(LockableQueue< HasherThreadOutputData* >* hashedDataQueue, 
-        std::list< ComparerThreadOutputData* >* allComparedItems, LockableQueue< ComparerThreadOutputData* >* duplicateItems,
-        double earlyOut, double dupeThreash)
-{
-    std::vector< InternalComparerThread > internalCompareThread;
-
-    //this guy needs to compare each incoming hashed data against all prexisting data, gonna be slow.
-    std::queue<HasherThreadOutputData* > workQueue;
-    HasherThreadOutputData* workItem;
-
-    while (!m_stop.stop_requested() || hashedDataQueue->Length() > 0)
+    size_t GetUniqueItemsCount()
     {
-        if (hashedDataQueue->try_pop_range(&workQueue, workChunkSize, 10ms) == 0)
-        {
-            std::this_thread::sleep_for(25ms);
-            continue;
-        }
+        return uniqueItems.size();
+    }
 
-        while (workQueue.size() > 0)
+    LockableQueue< CompareThreadDupeItem* >* GetOutputQueuePtr()
+    {
+        return &duplicateItems;
+    }
+
+    void EnterProcFunc(LockableQueue< HasherThreadOutputData<UINT_HASH_TYPE>* >* hashedDataQueue, double earlyOut, double dupeThreash)
+    {
+        //this guy needs to compare each incoming hashed data against all prexisting data, gonna be slow.
+        std::queue<HasherThreadOutputData<UINT_HASH_TYPE>* > workQueue;
+        HasherThreadOutputData< UINT_HASH_TYPE>* workItem;
+
+        while (!m_stop.stop_requested() || hashedDataQueue->Length() > 0)
         {
-            //early out since no checks
-            if (allComparedItems->size() == 0) [[unlikely]]
+            if (hashedDataQueue->try_pop_range(&workQueue, workChunkSize, 10ms) == 0)
             {
-                workItem = workQueue.front();
-                workQueue.pop();
-
-                ComparerThreadOutputData* citem = new ComparerThreadOutputData(std::move(workItem), 0.0);
-
-                //these dont need the arrow data, since they are nto being removed later
-                citem->myHashData->DeleteArrowData();
-                allComparedItems->push_back(std::move(citem));
+                std::this_thread::sleep_for(25ms);
                 continue;
             }
 
-            //spread the work of comparing across threads..  
-            uint32_t threadsToUse = maxThreadWorkers.load();
-
-            if (internalCompareThread.size() < threadsToUse) [[unlikely]]
-                internalCompareThread.resize(threadsToUse);
-
-            BS::multi_future<void> internalCompareThreadFutures;
-
-            for (size_t i = 0; i < threadsToUse && workQueue.size() > 0; ++i)
+            while (workQueue.size() > 0)
             {
-                workItem = std::move(workQueue.front());
-                workQueue.pop();
-
-                ComparerThreadOutputData* citem = new ComparerThreadOutputData(std::move(workItem), 0.0);
-           
-                internalCompareThreadFutures.push_back(
-                    threadPool->submit(&InternalComparerThread::EnterProcFunc, 
-                    &internalCompareThread[i], allComparedItems,
-                    earlyOut, dupeThreash, std::move(citem))
-                );
-            }
-
-            //wait for worker threads
-            internalCompareThreadFutures.wait();
-
-            //run through each and look at result, if its a dupe, pass it to dupes, if its not, we need to compare all the
-            std::list<ComparerThreadOutputData* > potenialKeepers;
-            for (size_t i = 0; i < internalCompareThreadFutures.size(); ++i)
-            {
-                double match = internalCompareThread[i].GetMaxMatchVal();
-                ComparerThreadOutputData* citem = internalCompareThread[i].GetComparerItem();
-
-                if (match >= dupeThreash)
+                //early out since no checks
+                if (uniqueItems.size() == 0) [[unlikely]]
                 {
-                    citem->maxMatchedVal = match;
+                    workItem = workQueue.front();
+                    workQueue.pop();
 
-                    /*
-                    std::cout << "found dupe: " << citem->myHashData->batchNum << ", " << citem->myHashData->docId << ", " << citem->myHashData->stringArrayInd << " of "
-                        << dupeItem->myHashData->batchNum << ", " << dupeItem->myHashData->docId << ", " << dupeItem->myHashData->stringArrayInd << std::endl;
-                    */
+                    CompareItem< UINT_HASH_TYPE>* citem = new CompareItem< UINT_HASH_TYPE>(std::move(workItem), 0.0);
 
-                    //for processing in the removal of dupes
-                    duplicateItems->push(std::move(citem));                        
-
-                    if (m_throwOutDupes)
-                    {
-                        //dont add this back to the list of all docs, no need to store dupes
-                        citem = nullptr;
-                    }
-                }
-
-                if (citem != nullptr)
-                    potenialKeepers.push_back(std::move(citem));
-            }
-
-            //now, compare all potential keepers against each other...
-            while(potenialKeepers.size() > 0)
-            {
-                ComparerThreadOutputData* citem = std::move(potenialKeepers.front());
-                potenialKeepers.pop_front();
-
-                //compare incoming against all others, update the its max value.
-                //this wilkl prioritize removing later documents that match, not the first one
-                for (auto it = potenialKeepers.begin(); it != potenialKeepers.end() && citem->maxMatchedVal < dupeThreash; it++)
-                {
-                    double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
-                        (*it)->myHashData->hashes.get(), (*it)->myHashData->hashLen,
-                        earlyOut);
-
-                    if (match > citem->maxMatchedVal)
-                    {
-                        citem->maxMatchedVal = match;
-
-                        if (citem->maxMatchedVal > dupeThreash)
-                        {
-                            //for processing in the removal of dupes
-                            duplicateItems->push(std::move(citem));
-
-                            if (m_throwOutDupes && citem->maxMatchedVal > dupeThreash)
-                            {
-                                //dont add this back to the list of all docs, no need to store dupes
-                                citem = nullptr;
-                                break;
-                            }
-                        }
-
-                    }
-                }
-
-                if (citem != nullptr)
-                {
                     //these dont need the arrow data, since they are nto being removed later
                     citem->myHashData->DeleteArrowData();
-                    allComparedItems->push_back(std::move(citem));
+                    uniqueItems.push_back(std::move(citem));
+                    continue;
                 }
-            }
 
+                    //spread the work of comparing across threads..  
+                uint32_t threadsToUse = maxThreadWorkers.load();
+                BS::multi_future<std::pair< CompareItem<UINT_HASH_TYPE>*, bool> > internalCompareThreadFutures;
+
+                for (size_t i = 0; i < threadsToUse && workQueue.size() > 0; ++i)
+                {
+                    workItem = std::move(workQueue.front());
+                    workQueue.pop();
+
+                    CompareItem< UINT_HASH_TYPE>* citem = new CompareItem< UINT_HASH_TYPE>(std::move(workItem), 0.0);
+
+                    internalCompareThreadFutures.push_back(
+                        threadPool->submit([this, &earlyOut, &dupeThreash, citem]() {
+                            return WorkThreadFunc<UINT_HASH_TYPE>(uniqueItems, earlyOut, dupeThreash, std::move(citem));
+                            }
+                        )
+                    );
+                }
+
+                //wait for worker threads
+                internalCompareThreadFutures.wait();
+
+                //run through each and look at result, if its a dupe, pass it to dupes, if its not, we need to compare all the
+                std::list<CompareItem<UINT_HASH_TYPE>* > potenialKeepers;
+                for (size_t i = 0; i < internalCompareThreadFutures.size(); ++i)
+                {
+                    std::pair< CompareItem<UINT_HASH_TYPE>*, bool> result = internalCompareThreadFutures[i].get();
+                    if (result.second == true)
+                    {
+                        //for processing in the removal of dupes
+                        CompareThreadDupeItem* dupeItem = new CompareThreadDupeItem(result.first->myHashData->arrowData->docId, result.first->myHashData->arrowData->rowNumber);
+                        duplicateItems.push(std::move(dupeItem));
+                        delete result.first;
+                    }
+                    else
+                    {
+                        potenialKeepers.push_back(std::move(result.first));
+                    }
+                }
+
+                //now, compare all potential keepers against each other...
+                while (potenialKeepers.size() > 0)
+                {
+                    CompareItem< UINT_HASH_TYPE>* citem = std::move(potenialKeepers.front());
+                    potenialKeepers.pop_front();
+
+                    //compare incoming against all others, update the its max value.
+                    //this wilkl prioritize removing later documents that match, not the first one
+                    for (auto it = potenialKeepers.begin(); it != potenialKeepers.end(); it++)
+                    {
+                        double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
+                            (*it)->myHashData->hashes.get(), (*it)->myHashData->hashLen,
+                            earlyOut);
+
+                        if (match >= dupeThreash)
+                        {
+                            CompareThreadDupeItem* dupeItem = new CompareThreadDupeItem(citem->myHashData->arrowData->docId, citem->myHashData->arrowData->rowNumber);
+                            duplicateItems.push(std::move(dupeItem));
+                            delete citem;
+                            citem = nullptr;
+                            break;
+                        }
+                    }
+
+                    if (citem != nullptr)
+                    {
+                        //these dont need the arrow data, since they are nto being removed later
+                        citem->myHashData->DeleteArrowData();
+                        uniqueItems.push_back(std::move(citem));
+                    }
+                }
+
+            }
         }
     }
-}
+};

@@ -59,6 +59,8 @@ protected:
 
     uint32_t maxLoadedRecordsQueued;
 
+    LockableQueue< ArrowLoaderThreadOutputData* > batchQueue;
+
 public:
     ArrowLoaderThread(uint32_t _maxLoadedRecordsQueued)
         :maxLoadedRecordsQueued(_maxLoadedRecordsQueued)
@@ -82,100 +84,98 @@ public:
         return totaldocs;
     }
 
-    void EnterProcFunc(std::vector<std::string> paths_to_file, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue, std::string dataColumnName)
+    LockableQueue< ArrowLoaderThreadOutputData* >* GetOutputQueuePtr()
     {
-        for(fileIndex = 0; fileIndex < paths_to_file.size(); ++fileIndex)
+        return &batchQueue;
+    }
+
+
+    void EnterProcFunc(std::vector<std::string> paths_to_file, std::string dataColumnName)
+    {
+        for (fileIndex = 0; fileIndex < paths_to_file.size(); ++fileIndex)
         {
             std::string& path_to_file = paths_to_file[fileIndex];
 
             std::cout << "File: " << (paths_to_file.size() - fileIndex) << " -> Streaming from: " << path_to_file << std::endl;
-            arrow::Status status = StreamArrowDataset(path_to_file, fileIndex, batchQueue, maxLoadedRecordsQueued, dataColumnName);
+            arrow::Status status = StreamArrowDataset(path_to_file, fileIndex, maxLoadedRecordsQueued, dataColumnName);
         }
     }
 
 protected:
-    arrow::Status StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue
-        , int maxCapacity, std::string dataColumnName);
-};
+    arrow::Status StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, int maxCapacity, std::string dataColumnName)
+    {
+        //open file
+        std::shared_ptr<arrow::io::RandomAccessFile> input;
+        ARROW_ASSIGN_OR_RAISE(input, arrow::io::MemoryMappedFile::Open(path_to_file, arrow::io::FileMode::READ));
+        ARROW_ASSIGN_OR_RAISE(auto ipc_reader, arrow::ipc::RecordBatchStreamReader::Open(input));
 
+        //no worky for this format
+        //std::shared_ptr<arrow::io::ReadableFile> input;
+        //ARROW_ASSIGN_OR_RAISE(input, arrow::io::ReadableFile::Open(path_to_file, arrow::default_memory_pool()));
+        //ARROW_ASSIGN_OR_RAISE(auto ipc_reader, arrow::ipc::RecordBatchFileReader::Open(input));
 
-//=====
-// arrow file streamer
-//=====
-arrow::Status ArrowLoaderThread::StreamArrowDataset(std::string path_to_file, uint32_t curfileInd, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue
-    , int maxCapacity, std::string dataColumnName)
-{
-    //open file
-    std::shared_ptr<arrow::io::RandomAccessFile> input;
-    ARROW_ASSIGN_OR_RAISE(input, arrow::io::MemoryMappedFile::Open(path_to_file, arrow::io::FileMode::READ));
-    ARROW_ASSIGN_OR_RAISE(auto ipc_reader, arrow::ipc::RecordBatchStreamReader::Open(input));
-
-    //no worky for this format
-    //std::shared_ptr<arrow::io::ReadableFile> input;
-    //ARROW_ASSIGN_OR_RAISE(input, arrow::io::ReadableFile::Open(path_to_file, arrow::default_memory_pool()));
-    //ARROW_ASSIGN_OR_RAISE(auto ipc_reader, arrow::ipc::RecordBatchFileReader::Open(input));
-
-    //read batches
-    int batchNum = 0;
-    int64_t lineNumOffset = 0;
-    while (true)
-    { 
-        if (batchQueue->Length() >= maxCapacity)
+        //read batches
+        int batchNum = 0;
+        int64_t lineNumOffset = 0;
+        while (true)
         {
-            std::this_thread::sleep_for(200ms);
-        }
-        else
-        {
-            //ARROW_ASSIGN_OR_RAISE(batch, ipc_reader->ReadRecordBatch(batchNum));
-            std::shared_ptr<arrow::RecordBatch> batch;
-            if (ipc_reader->ReadNext(&batch) == arrow::Status::OK() && batch != NULL)
+            if (batchQueue.Length() >= maxCapacity)
             {
-                ++totalbatches;
-                totaldocs += batch->num_rows();
-                
-                std::shared_ptr<arrow::Array> array = batch->GetColumnByName(dataColumnName);
-                arrow::StringArray stringArray(array->data());
-
-                if (stringArray.length() == 0)
-                {
-                    continue;
-                }
-                else
-                {
-                    for (int64_t i = 0; i < stringArray.length(); ++i)
-                    {
-                        if (stringArray.length() != batch->num_rows())
-                        {
-                            std::cout << "what do we have here???" << std::endl;
-                        }
-
-                        std::string_view view = stringArray.GetView(i);
-
-                        //convert and send
-                        U16String* u16str = new U16String();
-                        CharPtrToUStr(view.data(), view.size(), *u16str);
-
-                        ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData(curfileInd, lineNumOffset, i, std::move(u16str));
-#ifdef _DEBUG
-                        data->sourceFilePath = path_to_file;
-#endif
-                        batchQueue->push(std::move(data));
-                    }
-                }
-                batchNum++;
-                lineNumOffset += batch->num_rows(); //next offset for the next batch
-
-                batch.reset();
+                std::this_thread::sleep_for(200ms);
             }
             else
             {
-                break;
+                //ARROW_ASSIGN_OR_RAISE(batch, ipc_reader->ReadRecordBatch(batchNum));
+                std::shared_ptr<arrow::RecordBatch> batch;
+                if (ipc_reader->ReadNext(&batch) == arrow::Status::OK() && batch != NULL)
+                {
+                    ++totalbatches;
+                    totaldocs += batch->num_rows();
+
+                    std::shared_ptr<arrow::Array> array = batch->GetColumnByName(dataColumnName);
+                    arrow::StringArray stringArray(array->data());
+
+                    if (stringArray.length() == 0)
+                    {
+                        continue;
+                    }
+                    else
+                    {
+                        for (int64_t i = 0; i < stringArray.length(); ++i)
+                        {
+                            if (stringArray.length() != batch->num_rows())
+                            {
+                                std::cout << "what do we have here???" << std::endl;
+                            }
+
+                            std::string_view view = stringArray.GetView(i);
+
+                            //convert and send
+                            U16String* u16str = new U16String();
+                            CharPtrToUStr(view.data(), view.size(), *u16str);
+
+                            ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData(fileIndex, lineNumOffset, i, std::move(u16str));
+#ifdef _DEBUG
+                            data->sourceFilePath = path_to_file;
+#endif
+                            batchQueue.push(std::move(data));
+                        }
+                    }
+                    batchNum++;
+                    lineNumOffset += batch->num_rows(); //next offset for the next batch
+
+                    batch.reset();
+                }
+                else
+                {
+                    break;
+                }
             }
         }
+
+        arrow::Status status = ipc_reader->Close();
+        status = input->Close();
+        return arrow::Status::OK();
     }
 
-    arrow::Status status = ipc_reader->Close();
-    status = input->Close();
-    return arrow::Status::OK();
-}
-
+};
