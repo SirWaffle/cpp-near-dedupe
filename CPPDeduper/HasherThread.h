@@ -7,7 +7,7 @@
 template<typename UINT_HASH_TYPE>
 struct HasherThreadOutputData
 {
-    HasherThreadOutputData(ArrowLoaderThreadOutputData* _arrowLoaderData, std::unique_ptr<uint32_t[]> _hashes, uint32_t _hashLen)
+    HasherThreadOutputData(ArrowLoaderThreadOutputData* _arrowLoaderData, std::unique_ptr<UINT_HASH_TYPE[]> _hashes, uint32_t _hashLen)
         :arrowData(_arrowLoaderData),
         hashes(std::move(_hashes)),
         hashLen(_hashLen)
@@ -62,9 +62,9 @@ public:
 
         while (!m_stop.stop_requested() || batchQueueIn->Length() > 0)
         {
-            if (batchQueueIn->try_pop_range(&workQueue, readChunkSize, 10ms) == 0)
+            if (batchQueueIn->try_pop_range(&workQueue, readChunkSize, 25ms) == 0)
             {
-                std::this_thread::sleep_for(100ms);
+                std::this_thread::sleep_for(50ms);
                 continue;
             }
 

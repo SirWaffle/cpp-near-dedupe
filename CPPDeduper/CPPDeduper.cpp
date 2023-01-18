@@ -24,9 +24,9 @@
 
 static constexpr int HASH_LENGTH_SHINGLES = 5; //words used per hash
 static constexpr int NUM_HASHES = 256; //number of hashes for comparison
-#define HASH_TYPE uint32_t
+#define HASH_TYPE uint64_t
 
-static constexpr int MAX_RECORDS_LOADED = 4096 * 32; //the higher this is, the higher memory usage can get
+static constexpr int MAX_RECORDS_LOADED = 4096 * 16; //the higher this is, the higher memory usage can get
 
 //thread counts
 static constexpr int NUM_HASHER_THREADS = 4; // 4; //more threads crunch through mroe input faster
@@ -137,7 +137,7 @@ int main(int argc, const char** argv)
     uint32_t jaccardThreads = comparerThread->GetWorkerThreadCount();
     while (true)
     {     
-        std::this_thread::sleep_for(10s);
+        std::this_thread::sleep_for(1s);
 
         if (state == 0)
         {
@@ -193,8 +193,8 @@ int main(int argc, const char** argv)
         else
             std::cout << "   [0]Docs Loaded: " << arrowLoaderThread->GetTotalDocs();
 
-        if(state < 2)
-            std::cout << "   [" << NUM_HASHER_THREADS << "] Pending Hash..." << hasherThreads[0]->GetOutputQueuePtr()->Length();
+        if (state < 2)
+            std::cout << "   [" << NUM_HASHER_THREADS << "] Pending Hash..." << arrowLoaderThread->GetOutputQueuePtr()->Length();
         else
             std::cout << "   [0]hashing Done!";
 

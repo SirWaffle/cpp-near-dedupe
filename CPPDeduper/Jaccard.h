@@ -16,6 +16,8 @@
 #include <nmmintrin.h>
 #include <emmintrin.h>
 #else
+#include <nmmintrin.h>
+#include <emmintrin.h>
 #endif
 
 double JaccardClassical(const uint32_t* fng1, int len1, const uint32_t* fng2, int len2, double )
@@ -128,22 +130,62 @@ double JaccardTurbo(const uint32_t* fng1, int len1, const uint32_t* fng2, int le
     return nintersect / (double)nunion;
 }
 
-template<typename Func>
-void JaccardWrapper(Func func, const uint32_t* hashes, const std::vector<int>& offsets) {
-    double crc = 0.0;
-    for (int pass = 0; pass < 3; pass++) {
-        crc = 0.0;
-        for (size_t i = 0; i < offsets.size() - 1; i++) {
-            for (size_t j = i + 1; j < offsets.size() - 1; j++) {
-                const double alpha = 0.5;
-                double v = func(hashes + offsets[i], offsets[i + 1] - offsets[i],
-                    hashes + offsets[j], offsets[j + 1] - offsets[j],
-                    alpha);
-                if (v >= alpha) {
-                    crc += v;
+#pragma message("need to validate jaccard64 bit")
+double JaccardTurbo(const uint64_t* fng1, int len1, const uint64_t* fng2, int len2, double alpha)
+{
+    int smin = (int)std::ceil((1.0 - alpha) / (1.0 + alpha) * (len1 + len2));
+    int pos1 = 0;
+    int pos2 = 0;
+    int nintersect = 0;
+    int s = 0;
+    while (pos1 + 2 <= len1 && pos2 + 2 <= len2) {
+        __m128i v1 = _mm_loadu_si128((const __m128i*)(fng1 + pos1));
+        __m128i v2 = _mm_loadu_si128((const __m128i*)(fng2 + pos2));
+        uint64_t m = _mm_cvtsi128_si64(_mm_cmpestrm(v1, 8, v2, 8, _SIDD_UWORD_OPS | _SIDD_CMP_EQUAL_ANY | _SIDD_BIT_MASK));
+        if (m) {
+            for (int i = 0; i < 2; i++) {
+                if (fng1[pos1] == fng2[pos2]) {
+                    nintersect++;
+                    pos1++;
+                    pos2++;
+                }
+                else if (fng1[pos1] < fng2[pos2]) {
+                    pos1++;
+                    s++;
+                }
+                else {
+                    pos2++;
+                    s++;
                 }
             }
         }
+        else {
+            if (fng1[pos1 + 1] < fng2[pos2 + 1]) {
+                pos1 += 2;
+            }
+            else {
+                pos2 += 2;
+            }
+            s += 2;
+        }
+        if (s > smin) {
+            return 0.0;
+        }
     }
-    std::cout << "Checksum:" << crc << std::endl;
+    while (pos1 < len1 && pos2 < len2) {
+        if (fng1[pos1] == fng2[pos2]) {
+            nintersect++;
+            pos1++;
+            pos2++;
+        }
+        else if (fng1[pos1] < fng2[pos2]) {
+            pos1++;
+        }
+        else {
+            pos2++;
+        }
+    }
+
+    int nunion = len1 + len2 - nintersect;
+    return nintersect / (double)nunion;
 }
