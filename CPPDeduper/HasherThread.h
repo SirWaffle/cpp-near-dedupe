@@ -4,6 +4,7 @@
 #include "ArrowLoaderThread.h"
 #include "Hashing.h"
 
+
 template<typename UINT_HASH_TYPE>
 struct HasherThreadOutputData
 {
@@ -62,7 +63,7 @@ public:
 
         while (!m_stop.stop_requested() || batchQueueIn->Length() > 0)
         {
-            if (batchQueueIn->try_pop_range(&workQueue, readChunkSize, 25ms) == 0)
+            if (batchQueueIn->try_pop_range(&workQueue, readChunkSize, 100ms) == 0)
             {
                 std::this_thread::sleep_for(50ms);
                 continue;

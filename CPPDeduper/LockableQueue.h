@@ -2,6 +2,8 @@
 
 #include <queue>
 #include <chrono>
+#include <mutex>
+#include <condition_variable>
 
 //data passed between worker threads
 template<class T>

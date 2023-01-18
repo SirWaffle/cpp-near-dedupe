@@ -136,6 +136,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="ArrowLoaderThread.h" />
+    <ClInclude Include="CLI11.hpp" />
     <ClInclude Include="ComparerThread.h" />
     <ClInclude Include="DupeResolverThread.h" />
     <ClInclude Include="HasherThread.h" />

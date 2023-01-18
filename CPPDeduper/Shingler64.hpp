@@ -154,7 +154,7 @@ public:
 
         auto ReadWord = [&]() {
             while (i < txt_length && IsAlphanum(txt[i])) {
-                uint16_t c = txt[i];
+                //uint16_t c = txt[i];
                 for (int k = 0; k < K; k++) {
                     if(XXH64_update(xxh64states[k], &txt[i], sizeof(uint16_t)) == XXH_ERROR)
                         abort();

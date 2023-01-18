@@ -5,7 +5,6 @@
 #include <chrono>
 #include <thread>
 #include <queue>
-#include <condition_variable>
 #include <iostream>
 
 #include "DupeResolverThread.h"
@@ -14,7 +13,7 @@
 #include "ArrowLoaderThread.h"
 #include "LockableQueue.h"
 #include "ThreadPool.h"
-
+#include "CLI11.hpp"
 
 /*
 * TODO:
@@ -24,38 +23,83 @@
 
 static constexpr int HASH_LENGTH_SHINGLES = 5; //words used per hash
 static constexpr int NUM_HASHES = 256; //number of hashes for comparison
-#define HASH_TYPE uint64_t
 
-static constexpr int MAX_RECORDS_LOADED = 4096 * 16; //the higher this is, the higher memory usage can get
 
-//thread counts
-static constexpr int NUM_HASHER_THREADS = 4; // 4; //more threads crunch through mroe input faster
 
+template<typename HASH_TYPE>
+int Run(std::string inputPath, std::string outPath, std::string dataColumnName, std::string extension,
+    double matchThresh, int numHasherThreads, int maxRecordsLoaded, int hashSize);
 
 //==========
 // main
 //==========
 int main(int argc, const char** argv)
 {
-    if (argc < 6)
-    {
-        std::cout << "usage: (this.exe) \"path\" \".ext\" \"dataColumn\" dupeThreshold \"outdir\"" << std::endl;
-        std::cout << "example: (this.exe) \"c:\\baseDirWithLotsOfArrowInSubdirs\" \".arrow\" \"text\" 0.7 \"c:\\outDir\"" << std::endl;
-        return 1;
+    //lets try CLI11
+    CLI::App app("SquishBrains CPPDeduper");
+    app.set_version_flag("--version", "pre-early-alpha-divided-by-zero");
+
+
+    //required params
+    std::string inputPath;
+    CLI::Option* opt = app.add_option("-i,--input", inputPath, "Input Folder")->required();
+
+    std::string outPath;
+    opt = app.add_option("-o,--output", outPath, "Output Folder")->required();
+
+    std::string dataColumnName;
+    opt = app.add_option("-d,--columnName", dataColumnName, "data column name")->required();
+
+
+    //optional
+    std::string extension = ".arrow";
+    opt = app.add_option("-e,--ext", extension, "arrow IPC extension");
+
+    double matchThresh = 0.7;
+    opt = app.add_option("-j,--jaccardSim", matchThresh, "min jaccard similarity value ( 0.0 to 1.0 )");
+
+    //thread counts
+    int numHasherThreads = 6; // 4; //more threads crunch through mroe input faster
+    opt = app.add_option("-t,--hashThreads", numHasherThreads, "threads dedicated to hashing");
+
+    int maxRecordsLoaded = 4096 * 16; //the higher this is, the higher memory usage can get
+    opt = app.add_option("-r,--maxRecords", maxRecordsLoaded, "max arrow rows to load at once");
+
+    int hashSize = 64; //the higher this is, the higher memory usage can get
+    opt = app.add_option("-s,--hashSize", hashSize, "hash size in bits, valid values ( 32 or 64 )");
+
+    try {
+        app.parse(argc, argv);
+    }
+    catch (const CLI::ParseError& e) {
+        std::cout << app.help("", CLI::AppFormatMode::All);
+        return app.exit(e);
     }
 
+    if (hashSize == 32)
+    {
+        return Run<uint32_t>(inputPath, outPath, dataColumnName, extension,
+            matchThresh, numHasherThreads, maxRecordsLoaded, hashSize);
+    }
+    else
+    {
+        return Run<uint64_t>(inputPath, outPath, dataColumnName, extension,
+            matchThresh, numHasherThreads, maxRecordsLoaded, hashSize);
+    }
+}
+
+template<typename HASH_TYPE>
+int Run(std::string inputPath, std::string outPath, std::string dataColumnName, std::string extension,
+    double matchThresh, int numHasherThreads, int maxRecordsLoaded, int hashSize)
+{
+    std::cout << "Running with all options:" << std::endl;
+
     //TODO: pass in arguments, for whatever params we want to control
-    std::filesystem::path basePath = argv[1];
-    std::string extension = argv[2];
-    std::string dataColumnName = argv[3];
-
-    char* p;
-    double matchThresh = strtod(argv[4], &p);
-
-    std::string output = argv[5];
+    std::filesystem::path basePath = inputPath;
 
 
-    std::cout << "Running with params: " << basePath << ", " << extension << ", " << dataColumnName << ", " << matchThresh << ", " << output << std::endl;
+    std::cout << "Running with params: " << basePath << ", " << extension << ", " << dataColumnName << ", " << matchThresh << ", " << outPath << std::endl;
+    std::cout << "Hash size of: " << hashSize << std::endl;
     std::cout << "Scanning for " << extension << " files in " << basePath;
 
     //quick and sloppy lookups of filenames, so we dont have to store in each unit of data
@@ -97,12 +141,12 @@ int main(int argc, const char** argv)
     //minimum threads...
     //1 loader thread, x hasher threads, 1 comparer thread, 1 output thread
     //the rest will operate as comparer workers
-    uint32_t baseThreads = 3 + NUM_HASHER_THREADS;
+    uint32_t baseThreads = 3 + numHasherThreads;
     BS::thread_pool threadPool(baseThreads, 0);
     uint32_t numThreads = threadPool.get_thread_count();
 
     //reader thread
-    ArrowLoaderThread* arrowLoaderThread = new ArrowLoaderThread(MAX_RECORDS_LOADED);
+    ArrowLoaderThread* arrowLoaderThread = new ArrowLoaderThread(maxRecordsLoaded);
     std::future<void> arrowLoaderThreadFuture = threadPool.submit(&ArrowLoaderThread::EnterProcFunc, arrowLoaderThread, fileNamesVector, dataColumnName);
 
     //hasher threads
@@ -110,7 +154,7 @@ int main(int argc, const char** argv)
     std::vector< HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>* > hasherThreads;
     BS::multi_future<void> hasherThreadFutures;
 
-    for (int i = 0; i < NUM_HASHER_THREADS; ++i)
+    for (int i = 0; i < numHasherThreads; ++i)
     {
         auto hasherThread = new HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>(&hashedDataQueue, 2048);
         hasherThreads.push_back(hasherThread);
@@ -127,7 +171,7 @@ int main(int argc, const char** argv)
         comparerThread, &hashedDataQueue, /*JACCARD_EARLY_OUT*/ matchThresh, matchThresh);
 
     //and as the comparer spits out the dupes, we can start removing them from the datasets...
-    DupeResolverThread* dupeResolverThread = new DupeResolverThread(basePath, output, 4096, false);
+    DupeResolverThread* dupeResolverThread = new DupeResolverThread(basePath, outPath, 4096, false);
     std::future<void> dupeResolverThreadFuture = threadPool.submit(&DupeResolverThread::EnterProcFunc, dupeResolverThread, comparerThread->GetOutputQueuePtr(), &fileNamesVector);
     
 
@@ -137,7 +181,7 @@ int main(int argc, const char** argv)
     uint32_t jaccardThreads = comparerThread->GetWorkerThreadCount();
     while (true)
     {     
-        std::this_thread::sleep_for(1s);
+        std::this_thread::sleep_for(10s);
 
         if (state == 0)
         {
@@ -150,7 +194,7 @@ int main(int argc, const char** argv)
                 state++;
                 //hashers are next to finish
                 //tell them all their parent task has finished
-                for (int i = 0; i < NUM_HASHER_THREADS; ++i)
+                for (int i = 0; i < numHasherThreads; ++i)
                     hasherThreads[i]->WaitForFinish();
             }
         }
@@ -158,10 +202,10 @@ int main(int argc, const char** argv)
         {
             if (hasherThreadFutures.wait_for(0ms) == std::future_status::ready)
             {
-                for (int i = 0; i < NUM_HASHER_THREADS; ++i)
+                for (int i = 0; i < numHasherThreads; ++i)
                     delete hasherThreads[i];
 
-                comparerThread->IncreaseMaxWorkerThreads(NUM_HASHER_THREADS);
+                comparerThread->IncreaseMaxWorkerThreads(numHasherThreads);
                 jaccardThreads = comparerThread->GetWorkerThreadCount();
 
                 state++;
@@ -194,7 +238,7 @@ int main(int argc, const char** argv)
             std::cout << "   [0]Docs Loaded: " << arrowLoaderThread->GetTotalDocs();
 
         if (state < 2)
-            std::cout << "   [" << NUM_HASHER_THREADS << "] Pending Hash..." << arrowLoaderThread->GetOutputQueuePtr()->Length();
+            std::cout << "   [" << numHasherThreads << "] Pending Hash..." << arrowLoaderThread->GetOutputQueuePtr()->Length();
         else
             std::cout << "   [0]hashing Done!";
 
@@ -219,4 +263,6 @@ int main(int argc, const char** argv)
     delete arrowLoaderThread;
     delete comparerThread;
     delete dupeResolverThread; 
+
+    return 0;
 }
