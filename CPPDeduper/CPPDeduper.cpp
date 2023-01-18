@@ -24,7 +24,7 @@
 
 static constexpr int HASH_LENGTH_SHINGLES = 5; //words used per hash
 static constexpr int NUM_HASHES = 256; //number of hashes for comparison
-#define HASH_TYPE uint64_t
+#define HASH_TYPE uint32_t
 
 static constexpr int MAX_RECORDS_LOADED = 4096 * 32; //the higher this is, the higher memory usage can get
 
@@ -106,12 +106,13 @@ int main(int argc, const char** argv)
     std::future<void> arrowLoaderThreadFuture = threadPool.submit(&ArrowLoaderThread::EnterProcFunc, arrowLoaderThread, fileNamesVector, dataColumnName);
 
     //hasher threads
+    LockableQueue< HasherThreadOutputData<HASH_TYPE>* > hashedDataQueue;
     std::vector< HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>* > hasherThreads;
     BS::multi_future<void> hasherThreadFutures;
 
     for (int i = 0; i < NUM_HASHER_THREADS; ++i)
     {
-        auto hasherThread = new HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>(2048);
+        auto hasherThread = new HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>(&hashedDataQueue, 2048);
         hasherThreads.push_back(hasherThread);
 
         hasherThreadFutures.push_back(threadPool.submit(&HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>::EnterProcFunc, hasherThread, arrowLoaderThread->GetOutputQueuePtr()));
@@ -123,11 +124,11 @@ int main(int argc, const char** argv)
     //for binary 'dupe or not', we dont need to score, so use the threshval for early out as well
     //hashers have a static queue, one shared across them all
     std::future<void> comparerThreadFuture = threadPool.submit(&ComparerThread<HASH_TYPE>::EnterProcFunc, 
-        comparerThread, hasherThreads[0]->GetOutputQueuePtr(), /*JACCARD_EARLY_OUT*/ matchThresh, matchThresh);
+        comparerThread, &hashedDataQueue, /*JACCARD_EARLY_OUT*/ matchThresh, matchThresh);
 
     //and as the comparer spits out the dupes, we can start removing them from the datasets...
     DupeResolverThread* dupeResolverThread = new DupeResolverThread(basePath, output, 4096, false);
-    std::future<void> dupeResolverThreadFuture = threadPool.submit(&DupeResolverThread::EnterProcFunc, dupeResolverThread, &duplicates, &fileNamesVector);
+    std::future<void> dupeResolverThreadFuture = threadPool.submit(&DupeResolverThread::EnterProcFunc, dupeResolverThread, comparerThread->GetOutputQueuePtr(), &fileNamesVector);
     
 
     //wait for tasks to complete
@@ -193,12 +194,12 @@ int main(int argc, const char** argv)
             std::cout << "   [0]Docs Loaded: " << arrowLoaderThread->GetTotalDocs();
 
         if(state < 2)
-            std::cout << "   [" << NUM_HASHER_THREADS << "] Pending Hash..." << batchQueue.Length();
+            std::cout << "   [" << NUM_HASHER_THREADS << "] Pending Hash..." << hasherThreads[0]->GetOutputQueuePtr()->Length();
         else
             std::cout << "   [0]hashing Done!";
 
         std::cout << "   [" << jaccardThreads << "] Pending Jaccard..." << hashedDataQueue.Length();
-        std::cout << "   Unique Docs: " << allComparedItems.size();
+        std::cout << "   Unique Docs: " << comparerThread->GetUniqueItemsCount();
         std::cout << "   Dupe Docs: " << dupeResolverThread->PendingDuplicates();
         std::cout << std::endl;
     }
@@ -208,7 +209,7 @@ int main(int argc, const char** argv)
     //aaaand done
     auto duration = duration_cast<std::chrono::seconds>(stopTime - startTime);
     std::cout << "Finished in " << (uint64_t)(duration.count()) << "s" << std::endl;
-    std::cout << "Found " << allComparedItems.size() << " Unique documents" << std::endl;
+    std::cout << "Found " << comparerThread->GetUniqueItemsCount() << " Unique documents" << std::endl;
     std::cout << "Found " << dupeResolverThread->TotalDupes() << " duplicates, and removed " << dupeResolverThread->TotalDupesRemoved() << std::endl;
     std::cout << "Total batches: " << arrowLoaderThread->GetTotalBatches() << " and total docs: " << arrowLoaderThread->GetTotalDocs() << std::endl;
 
@@ -217,11 +218,5 @@ int main(int argc, const char** argv)
     threadPool.reset(0);
     delete arrowLoaderThread;
     delete comparerThread;
-    delete dupeResolverThread;
-    while (allComparedItems.size() > 0)
-    {
-        delete allComparedItems.front();
-        allComparedItems.pop_front();
-    }
-   
+    delete dupeResolverThread; 
 }

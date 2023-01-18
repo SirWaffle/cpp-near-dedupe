@@ -24,17 +24,11 @@
 //resolves the dupe files, writes out to arrow memory mapped files to mimic hugging faces datasets
 //only processes files completed by the loader thread, so we dont operate on the same files at the same time
 
-
 struct DupeItem
 {
     DupeItem(uint32_t _docId, int64_t _rowNumber)
         :docId(_docId),
         rowNumber(_rowNumber)
-    {}
-
-    DupeItem(ComparerThreadOutputData* compareData)
-        :docId(compareData->myHashData->arrowData->docId),
-        rowNumber(compareData->myHashData->arrowData->rowNumber)
     {}
 
     uint32_t docId;
@@ -108,12 +102,12 @@ public:
         return pendingDuplicates;
     }
 
-    void EnterProcFunc(LockableQueue< ComparerThreadOutputData* >* duplicates, 
+    void EnterProcFunc(LockableQueue< CompareThreadDupeItem* >* duplicates, 
         std::vector<std::string>* fileNamesVector)
     {
 
-        std::queue<ComparerThreadOutputData* > workQueue;
-        ComparerThreadOutputData* workItem;
+        std::queue<CompareThreadDupeItem* > workQueue;
+        CompareThreadDupeItem* workItem;
 
         //ok, we have a lot of info to work with here. items contain fingerprints for the docs, the doc id, and the batchnum it came from
         //TODO: theoretically we could work in place and scrub files we already processed... dangerous to destroy data though
@@ -135,14 +129,14 @@ public:
 
                 //we cant do anything until the arrowStreamer has completed streaming in files...
                 //lets jsut start stuffing them into the map as they filter in
-                auto docIdList = fileIdToDuplicate.find(workItem->myHashData->arrowData->docId);
+                auto docIdList = fileIdToDuplicate.find(workItem->docId);
                 if (docIdList == fileIdToDuplicate.end())
                 {
-                    fileIdToDuplicate.insert(std::pair{ workItem->myHashData->arrowData->docId, std::set<DupeItem, compare_batchNums_insert >({ DupeItem(workItem) }) } );
+                    fileIdToDuplicate.insert(std::pair{ workItem->docId, std::set<DupeItem, compare_batchNums_insert >({ DupeItem(workItem->docId, workItem->rowNumber) }) } );
                 }
                 else
                 {
-                    docIdList->second.insert(std::move(workItem));
+                    docIdList->second.insert(DupeItem(workItem->docId, workItem->rowNumber));
                 }
             }
         }

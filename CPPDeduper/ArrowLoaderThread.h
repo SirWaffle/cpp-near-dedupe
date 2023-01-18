@@ -97,13 +97,12 @@ public:
             std::string& path_to_file = paths_to_file[fileIndex];
 
             std::cout << "File: " << (paths_to_file.size() - fileIndex) << " -> Streaming from: " << path_to_file << std::endl;
-            arrow::Status status = StreamArrowDataset(path_to_file, fileIndex, batchQueue, maxLoadedRecordsQueued, dataColumnName);
+            arrow::Status status = StreamArrowDataset(path_to_file, fileIndex, maxLoadedRecordsQueued, dataColumnName);
         }
     }
 
 protected:
-    arrow::Status StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, LockableQueue< ArrowLoaderThreadOutputData* >* batchQueue
-        , int maxCapacity, std::string dataColumnName)
+    arrow::Status StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, int maxCapacity, std::string dataColumnName)
     {
         //open file
         std::shared_ptr<arrow::io::RandomAccessFile> input;
@@ -120,7 +119,7 @@ protected:
         int64_t lineNumOffset = 0;
         while (true)
         {
-            if (batchQueue->Length() >= maxCapacity)
+            if (batchQueue.Length() >= maxCapacity)
             {
                 std::this_thread::sleep_for(200ms);
             }
@@ -155,11 +154,11 @@ protected:
                             U16String* u16str = new U16String();
                             CharPtrToUStr(view.data(), view.size(), *u16str);
 
-                            ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData(curfileInd, lineNumOffset, i, std::move(u16str));
+                            ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData(fileIndex, lineNumOffset, i, std::move(u16str));
 #ifdef _DEBUG
                             data->sourceFilePath = path_to_file;
 #endif
-                            batchQueue->push(std::move(data));
+                            batchQueue.push(std::move(data));
                         }
                     }
                     batchNum++;

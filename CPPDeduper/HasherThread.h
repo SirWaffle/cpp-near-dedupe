@@ -4,43 +4,44 @@
 #include "ArrowLoaderThread.h"
 #include "Hashing.h"
 
+template<typename UINT_HASH_TYPE>
+struct HasherThreadOutputData
+{
+    HasherThreadOutputData(ArrowLoaderThreadOutputData* _arrowLoaderData, std::unique_ptr<uint32_t[]> _hashes, uint32_t _hashLen)
+        :arrowData(_arrowLoaderData),
+        hashes(std::move(_hashes)),
+        hashLen(_hashLen)
+
+    {}
+
+    ~HasherThreadOutputData()
+    {
+        DeleteArrowData();
+    }
+
+    void DeleteArrowData()
+    {
+        delete arrowData;
+        arrowData = nullptr;
+    }
+
+    ArrowLoaderThreadOutputData* arrowData;
+    std::unique_ptr<UINT_HASH_TYPE[]> hashes;
+    uint32_t hashLen;
+};
+
 template<int HASH_LEN_SHINGLES, int NUM_HASHES, typename UINT_HASH_TYPE>
 class HasherThread
 {
-public:
-    struct HasherThreadOutputData
-    {
-        HasherThreadOutputData(ArrowLoaderThreadOutputData* _arrowLoaderData, std::unique_ptr<uint32_t[]> _hashes, uint32_t _hashLen)
-            :arrowData(_arrowLoaderData),
-            hashes(std::move(_hashes)),
-            hashLen(_hashLen)
-
-        {}
-
-        ~HasherThreadOutputData()
-        {
-            DeleteArrowData();
-        }
-
-        void DeleteArrowData()
-        {
-            delete arrowData;
-            arrowData = nullptr;
-        }
-
-        ArrowLoaderThreadOutputData* arrowData;
-        std::unique_ptr<UINT_HASH_TYPE[]> hashes;
-        uint32_t hashLen;
-    };
-
 protected:
     std::stop_source m_stop;
     uint32_t readChunkSize;
-    static LockableQueue< HasherThreadOutputData* > hashedDataQueue;
+    LockableQueue< HasherThreadOutputData<UINT_HASH_TYPE>* >* hashedDataQueue;
 
 public:
-    HasherThread(uint32_t _readChunkSize)
-        :readChunkSize(_readChunkSize)
+    HasherThread(LockableQueue< HasherThreadOutputData<UINT_HASH_TYPE>* >* hashedDataQueue, uint32_t _readChunkSize)
+        :readChunkSize(_readChunkSize),
+        hashedDataQueue(hashedDataQueue)
     {
     }
 
@@ -49,9 +50,9 @@ public:
         m_stop.request_stop();
     }
 
-    LockableQueue< HasherThreadOutputData* >* GetOutputQueuePtr()
+    LockableQueue< HasherThreadOutputData<UINT_HASH_TYPE>* >* GetOutputQueuePtr()
     {
-        return &hashedDataQueue;
+        return hashedDataQueue;
     }
 
     void EnterProcFunc(LockableQueue< ArrowLoaderThreadOutputData* >* batchQueueIn)
@@ -78,7 +79,7 @@ public:
                 workItem->DeleteData();
 
                 //push into hashedQueue
-                HasherThreadOutputData* hashed = new HasherThreadOutputData(workItem, std::move(hashes), hashLen);
+                HasherThreadOutputData< UINT_HASH_TYPE>* hashed = new HasherThreadOutputData< UINT_HASH_TYPE>(workItem, std::move(hashes), hashLen);
                 hashed->arrowData = std::move(workItem);
 
                 hashedDataQueue->push(std::move(hashed));
