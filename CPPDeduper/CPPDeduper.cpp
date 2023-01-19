@@ -261,7 +261,7 @@ int main(int argc, const char** argv)
     opt = app.add_option("-j,--jaccardSim", matchThresh, "min jaccard similarity value ( 0.0 to 1.0 )");
 
     //thread counts
-    int numHasherThreads = 7; // 4; //more threads crunch through mroe input faster
+    int numHasherThreads = 10; // 4; //more threads crunch through mroe input faster
     opt = app.add_option("-t,--hashThreads", numHasherThreads, "threads dedicated to hashing");
 
     int maxRecordsLoaded = 4096 * 48; //the higher this is, the higher memory usage can get
