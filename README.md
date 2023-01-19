@@ -5,10 +5,8 @@ dedupes arrow datasets ( IPC .arrow db's at the moment) using minhash / jaccard 
 this project was thrown together in a few days and fueled by large amounts of coffee, so things are getting cleaned / fixed / improved, and there are likely bugs and other oddities in the code 
 
 # todo
-- contiguous blocks of hashed values to increase speed (memory access, and better parallelization of loops) of comparison checks using jaccard ( this is the long leg at the moment )
-- work stealing to speed up jaccard compare checks when other threads are less busy
 - better readme
-- more commandline arguments for more options
+- work stealing to speed up jaccard compare checks when other threads are less busy
 - better error checking
 - handle various arrow formats
 - handle different CPU intrinsics for more hardware support
@@ -47,6 +45,10 @@ sudo make release
 - windows/linux
 
 ```
+THIS IS OUT OF DATE
+executing the program with -h or --help will display commandlien arguments
+this will be updated shortly...
+
 executing the program with no cmd args will display the expected cmd args.
 
 usage: 
