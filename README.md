@@ -5,7 +5,8 @@ dedupes arrow datasets ( IPC .arrow db's at the moment) using minhash / jaccard 
 this project was thrown together in a few days and fueled by large amounts of coffee, so things are getting cleaned / fixed / improved, and there are likely bugs and other oddities in the code 
 
 # todo
-- replace queues with arrays/vectors/ring buffers where possible
+- change dedupe dupe items to only store the line number, instead of pointer to the dupeItem struct ( RAM savings )
+- replace queues with arrays/vectors/ring buffers where possible ( CPU perf, less memory fragmentation )
 - better readme
 - work stealing to speed up jaccard compare checks when other threads are less busy
 - better error checking
