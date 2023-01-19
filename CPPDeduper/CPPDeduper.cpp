@@ -163,11 +163,11 @@ int Run(std::string inputPath, std::string outPath, std::string dataColumnName, 
     }
 
     //comparer
-    ComparerThread<HASH_TYPE>* comparerThread = new ComparerThread<HASH_TYPE>(true, 4096, &threadPool, std::max(1U, numThreads - baseThreads));
+    ComparerThread<HASH_TYPE, NUM_HASHES>* comparerThread = new ComparerThread<HASH_TYPE, NUM_HASHES>(true, 4096, &threadPool, std::max(1U, numThreads - baseThreads));
 
     //for binary 'dupe or not', we dont need to score, so use the threshval for early out as well
     //hashers have a static queue, one shared across them all
-    std::future<void> comparerThreadFuture = threadPool.submit(&ComparerThread<HASH_TYPE>::EnterProcFunc, 
+    std::future<void> comparerThreadFuture = threadPool.submit(&ComparerThread<HASH_TYPE, NUM_HASHES>::EnterProcFunc,
         comparerThread, &hashedDataQueue, /*JACCARD_EARLY_OUT*/ matchThresh, matchThresh);
 
     //and as the comparer spits out the dupes, we can start removing them from the datasets...

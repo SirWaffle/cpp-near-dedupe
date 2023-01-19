@@ -38,6 +38,63 @@ struct CompareItem
 };
 
 
+//memory stuff
+template<typename UINT_HASH_TYPE, uint32_t HASH_COUNT>
+struct HashBlockEntry
+{
+    UINT_HASH_TYPE hashes[HASH_COUNT];
+    uint64_t hashLen = 0;
+};
+
+template<typename UINT_HASH_TYPE, uint32_t HASH_COUNT, uint32_t BLOCK_SIZE>
+struct Block
+{
+    UINT_HASH_TYPE size = 0;
+    HashBlockEntry<UINT_HASH_TYPE, HASH_COUNT> entries[BLOCK_SIZE];
+
+};
+
+template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
+class HashBlockAllocator
+{
+    //last entry is where we add stuff...
+    std::vector< Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* > fullBlocks;
+    std::vector< Block<UINT_HASH_TYPE, MAX_HASH_LEN / 2, BLOCK_SIZE>* > halfBLocks;
+
+public:
+    HashBlockAllocator(uint32_t initialCapacity)
+    {
+        fullBlocks.capacity(initialCapacity);
+        halfBLocks.capacity(initialCapacity);
+    }
+
+    void AddCompareItem(CompareItem<UINT_HASH_TYPE>* citem)
+    {
+        if (citem->myHashData->hashLen > MAX_HASH_LEN / 2)
+        {
+            Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* b = fullBlocks[fullBlocks.size() - 1]
+            (*b)[b->size].hashes = citem->myHashData->hashes;
+            (*b)[b->size].hashLen = citem->myHashData->hashLen;
+            b->size++;
+            if (b->size == BLOCK_SIZE)
+            {
+                fullBlocks.push_back(new Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>());
+            }
+        }
+        else
+        {
+            Block<UINT_HASH_TYPE, MAX_HASH_LEN / 2, BLOCK_SIZE>* b = halfBLocks[fullBlocks.size() - 1]
+            (*b)[b->size].hashes = citem->myHashData->hashes;
+            (*b)[b->size].hashLen = citem->myHashData->hashLen;
+            b->size++;
+            if (b->size == BLOCK_SIZE)
+            {
+                halfBLocks.push_back(new Block<UINT_HASH_TYPE, MAX_HASH_LEN / 2, BLOCK_SIZE>());
+            }
+        }
+    }
+};
+
 
 template<typename UINT_HASH_TYPE>
 std::pair< CompareItem<UINT_HASH_TYPE>*, bool> WorkThreadFunc(std::list< CompareItem<UINT_HASH_TYPE>* >& allComparedItems, double earlyOut, double dupeThreash, CompareItem<UINT_HASH_TYPE>* citem)
@@ -60,7 +117,7 @@ std::pair< CompareItem<UINT_HASH_TYPE>*, bool> WorkThreadFunc(std::list< Compare
 }
 
 
-template<typename UINT_HASH_TYPE>
+template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN>
 class ComparerThread
 {
 protected:
