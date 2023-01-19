@@ -5,6 +5,7 @@ dedupes arrow datasets ( IPC .arrow db's at the moment) using minhash / jaccard 
 this project was thrown together in a few days and fueled by large amounts of coffee, so things are getting cleaned / fixed / improved, and there are likely bugs and other oddities in the code 
 
 # todo
+- LSH bands to reduce total number up comparisons
 - expose and implement wyas to set max memory usage for some tasks ( like file loader ) and more data to track memory usage across stages ( io in, hashing, comparing, io out )
 - change dedupe dupe items to only store the line number, instead of pointer to the dupeItem struct ( RAM savings )
 - replace queues with arrays/vectors/ring buffers where possible ( CPU perf, less memory fragmentation )
