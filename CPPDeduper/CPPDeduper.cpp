@@ -267,10 +267,10 @@ int main(int argc, const char** argv)
     int maxRecordsLoaded = 4096 * 64; //the higher this is, the higher memory usage can get
     opt = app.add_option("-r,--maxRecords", maxRecordsLoaded, "max arrow rows to load at once");
 
-    int hashSize = 64; //the higher this is, the higher memory usage can get
+    int hashSize = 64; //hash key size
     opt = app.add_option("-s,--hashSize", hashSize, "hash size in bits, valid values ( 32 or 64 )");
 
-    int hashBlockSize = 512; //the higher this is, the higher memory usage can get
+    int hashBlockSize = 512; //size of contiguous memory blocks of hashes used in compare thread, best if its cacheable on the cpu
     opt = app.add_option("-b,--hashBlockSize", hashBlockSize, "size of memory blocks of unique hashes, valid values ( 256, 512, 1024, 2048, 4096 )");
 
     try {
