@@ -100,7 +100,7 @@ public:
 
         for (int i = 0; i < numHasherThreads; ++i)
         {
-            auto hasherThread = new HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>(&hashedDataQueue, 2048);
+            auto hasherThread = new HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>(&hashedDataQueue, 1024);
             hasherThreads.push_back(hasherThread);
 
             hasherThreadFutures.push_back(threadPool.submit(&HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>::EnterProcFunc, hasherThread, arrowLoaderThread->GetOutputQueuePtr()));
@@ -261,10 +261,10 @@ int main(int argc, const char** argv)
     opt = app.add_option("-j,--jaccardSim", matchThresh, "min jaccard similarity value ( 0.0 to 1.0 )");
 
     //thread counts
-    int numHasherThreads = 6; // 4; //more threads crunch through mroe input faster
+    int numHasherThreads = 7; // 4; //more threads crunch through mroe input faster
     opt = app.add_option("-t,--hashThreads", numHasherThreads, "threads dedicated to hashing");
 
-    int maxRecordsLoaded = 4096 * 64; //the higher this is, the higher memory usage can get
+    int maxRecordsLoaded = 4096 * 48; //the higher this is, the higher memory usage can get
     opt = app.add_option("-r,--maxRecords", maxRecordsLoaded, "max arrow rows to load at once");
 
     int hashSize = 64; //hash key size

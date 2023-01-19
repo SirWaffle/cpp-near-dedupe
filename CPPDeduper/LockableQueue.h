@@ -27,7 +27,7 @@ public:
             inqueue->pop();
         }
 
-        populatedNotifier.notify_one();
+        populatedNotifier.notify_all();
     }
 
     bool try_pop(T* item, std::chrono::milliseconds timeout = 1)

@@ -36,8 +36,11 @@ struct ArrowLoaderThreadOutputData
     void DeleteData()
     {
         //data->clear();
-        delete data;
-        data = nullptr;
+        if (data != nullptr)
+        {
+            delete data;
+            data = nullptr;
+        }
     }
 
     uint32_t docId;
@@ -156,6 +159,7 @@ protected:
 
                             //convert and send
                             U16String* u16str = new U16String();
+                            u16str->reserve(view.size());
                             CharPtrToUStr(view.data(), view.size(), *u16str);
 
                             ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData(fileIndex, lineNumOffset, i, std::move(u16str));
