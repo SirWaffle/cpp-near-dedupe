@@ -38,6 +38,7 @@ protected:
     std::stop_source m_stop;
     uint32_t readChunkSize;
     LockableQueue< HasherThreadOutputData<UINT_HASH_TYPE>* >* hashedDataQueue;
+    const uint32_t workOutQueueSize = 1024;
 
 public:
     HasherThread(LockableQueue< HasherThreadOutputData<UINT_HASH_TYPE>* >* hashedDataQueue, uint32_t _readChunkSize)
@@ -58,12 +59,13 @@ public:
 
     void EnterProcFunc(LockableQueue< ArrowLoaderThreadOutputData* >* batchQueueIn)
     {
+        std::queue< HasherThreadOutputData<UINT_HASH_TYPE>* > workOutQueue;
         std::queue<ArrowLoaderThreadOutputData* > workQueue;
         ArrowLoaderThreadOutputData* workItem;
 
         while (!m_stop.stop_requested() || batchQueueIn->Length() > 0)
         {
-            if (batchQueueIn->try_pop_range(&workQueue, readChunkSize, 100ms) == 0)
+            if (batchQueueIn->try_pop_range(&workQueue, readChunkSize, 10000ms) == 0)
             {
                 std::this_thread::sleep_for(50ms);
                 continue;
@@ -83,8 +85,14 @@ public:
                 HasherThreadOutputData< UINT_HASH_TYPE>* hashed = new HasherThreadOutputData< UINT_HASH_TYPE>(workItem, std::move(hashes), hashLen);
                 hashed->arrowData = std::move(workItem);
 
-                hashedDataQueue->push(std::move(hashed));
+                workOutQueue.push(std::move(hashed));
+
+                if (workOutQueueSize < workOutQueue.size())
+                    hashedDataQueue->push_queue(&workOutQueue);
             }
         }
+
+        if(workOutQueue.size() > 0)
+            hashedDataQueue->push_queue(&workOutQueue);
     }
 };

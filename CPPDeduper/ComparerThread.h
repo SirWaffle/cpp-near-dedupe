@@ -54,70 +54,116 @@ struct Block
 
 };
 
+
+//just test with full blocks for now
 template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
 class HashBlockAllocator
 {
     //last entry is where we add stuff...
     std::vector< Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* > fullBlocks;
-    std::vector< Block<UINT_HASH_TYPE, MAX_HASH_LEN / 2, BLOCK_SIZE>* > halfBLocks;
+    bool empty = true;
+    //std::vector< Block<UINT_HASH_TYPE, MAX_HASH_LEN / 2, BLOCK_SIZE>* > halfBLocks;
 
 public:
     HashBlockAllocator(uint32_t initialCapacity)
     {
-        fullBlocks.capacity(initialCapacity);
-        halfBLocks.capacity(initialCapacity);
+        //reserve and add first block to fill
+        fullBlocks.reserve(initialCapacity);
+        fullBlocks.push_back(new Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>());
+    }
+
+    ~HashBlockAllocator()
+    {
+        for (auto block : fullBlocks)
+        {
+            delete block;
+        }
+    }
+
+    uint64_t NumEntries()
+    {
+        return uint64_t(fullBlocks.size() * BLOCK_SIZE) - BLOCK_SIZE + fullBlocks[fullBlocks.size() -1]->size;
+    }
+
+    size_t NumBlocks()
+    {
+        return fullBlocks.size();
+    }
+
+    uint64_t MemoryUsage()
+    {
+        uint64_t items = uint64_t(fullBlocks.size() * BLOCK_SIZE) - BLOCK_SIZE + fullBlocks[fullBlocks.size() - 1]->size;
+        items *= MAX_HASH_LEN;
+        return items * (uint64_t)sizeof(UINT_HASH_TYPE);
+    }
+
+    bool IsEmpty()
+    {
+        return empty;
+    }
+
+    Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* GetBlockPtr(uint32_t ind)
+    {
+        return fullBlocks[ind];
     }
 
     void AddCompareItem(CompareItem<UINT_HASH_TYPE>* citem)
     {
-        if (citem->myHashData->hashLen > MAX_HASH_LEN / 2)
+        AddItem(citem->myHashData->hashes.get(), citem->myHashData->hashLen);
+    }
+
+    void AddItem(UINT_HASH_TYPE* hashes, uint32_t len)
+    {
+        empty = false;
+        Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* b = fullBlocks[fullBlocks.size() - 1];
+
+#ifdef __GNUC__
+        memcpy(&(b->entries[b->size].hashes), hashes, len * sizeof(UINT_HASH_TYPE));
+#else
+        memcpy_s( &(b->entries[b->size].hashes), MAX_HASH_LEN * sizeof(UINT_HASH_TYPE), hashes, len * sizeof(UINT_HASH_TYPE));
+#endif
+        b->entries[b->size].hashLen = len;
+
+        b->size++;
+        if (b->size == BLOCK_SIZE)
         {
-            Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* b = fullBlocks[fullBlocks.size() - 1]
-            (*b)[b->size].hashes = citem->myHashData->hashes;
-            (*b)[b->size].hashLen = citem->myHashData->hashLen;
-            b->size++;
-            if (b->size == BLOCK_SIZE)
-            {
-                fullBlocks.push_back(new Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>());
-            }
-        }
-        else
-        {
-            Block<UINT_HASH_TYPE, MAX_HASH_LEN / 2, BLOCK_SIZE>* b = halfBLocks[fullBlocks.size() - 1]
-            (*b)[b->size].hashes = citem->myHashData->hashes;
-            (*b)[b->size].hashLen = citem->myHashData->hashLen;
-            b->size++;
-            if (b->size == BLOCK_SIZE)
-            {
-                halfBLocks.push_back(new Block<UINT_HASH_TYPE, MAX_HASH_LEN / 2, BLOCK_SIZE>());
-            }
+            fullBlocks.push_back(new Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>());
         }
     }
 };
 
 
-template<typename UINT_HASH_TYPE>
-std::pair< CompareItem<UINT_HASH_TYPE>*, bool> WorkThreadFunc(std::list< CompareItem<UINT_HASH_TYPE>* >& allComparedItems, double earlyOut, double dupeThreash, CompareItem<UINT_HASH_TYPE>* citem)
+template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
+bool WorkThreadFunc(
+    std::stop_source workerThreadStopper,
+    HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>& hashblocks, uint32_t inclusiveStartInd, uint32_t exclusiveEndInd,
+    double earlyOut, double dupeThreash, CompareItem<UINT_HASH_TYPE>* citem)
 {
     //compare incoming against all others, update the its max value.
     //this will prioritize removing later documents that match, not the first one
-    for (auto it = allComparedItems.begin(); it != allComparedItems.end(); it++)
+    for (uint32_t blockInd = inclusiveStartInd; blockInd < exclusiveEndInd; blockInd++)
     {
-        double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
-            (*it)->myHashData->hashes.get(), (*it)->myHashData->hashLen,
-            earlyOut);
+        Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* block = hashblocks.GetBlockPtr(blockInd);
 
-        if (match >= dupeThreash)
+        for (uint32_t hashInd = 0; hashInd < block->size && !workerThreadStopper.stop_requested(); ++hashInd)
         {
-            //we are done
-            return std::pair< CompareItem<UINT_HASH_TYPE>*, bool>(citem, true);
+            double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
+                &(block->entries[hashInd].hashes[0]), (int)(block->entries[hashInd].hashLen),
+                earlyOut);
+
+            if (match >= dupeThreash)
+            {
+                //we are done
+                workerThreadStopper.request_stop();
+                return true;
+            }
         }
     }
-    return std::pair< CompareItem<UINT_HASH_TYPE>*, bool>(citem, false);
+    return false;
 }
 
 
-template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN>
+template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
 class ComparerThread
 {
 protected:
@@ -127,25 +173,23 @@ protected:
     BS::thread_pool* threadPool;
     uint32_t workChunkSize;
 
-    std::list< CompareItem<UINT_HASH_TYPE>* > uniqueItems;
+
     LockableQueue< CompareThreadDupeItem* > duplicateItems;
+
+    HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE> hashblocks;
 
 public:
     ComparerThread(bool throwOutDupes, uint32_t _workChunkSize, BS::thread_pool* _threadPool, uint32_t maxThreadWorkers = 0)
         :m_throwOutDupes(throwOutDupes),
         maxThreadWorkers(maxThreadWorkers),
         threadPool(_threadPool),
-        workChunkSize(_workChunkSize)
+        workChunkSize(_workChunkSize),
+        hashblocks(HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(4096))
     {
     }
 
     ~ComparerThread()
     {
-        while (uniqueItems.size() > 0)
-        {
-            delete uniqueItems.front();
-            uniqueItems.pop_front();
-        }
     }
 
     void IncreaseMaxWorkerThreads(int amt)
@@ -165,7 +209,12 @@ public:
 
     size_t GetUniqueItemsCount()
     {
-        return uniqueItems.size();
+        return hashblocks.NumEntries();
+    }
+
+    uint64_t GetMemUsageMB()
+    {
+        return hashblocks.MemoryUsage() / (1024ULL * 1024ULL);
     }
 
     LockableQueue< CompareThreadDupeItem* >* GetOutputQueuePtr()
@@ -189,93 +238,85 @@ public:
 
             while (workQueue.size() > 0)
             {
+                workItem = workQueue.front();
+                workQueue.pop();
+
                 //early out since no checks
-                if (uniqueItems.size() == 0) [[unlikely]]
+                if (hashblocks.IsEmpty()) [[unlikely]]
                 {
-                    workItem = workQueue.front();
-                    workQueue.pop();
-
-                    CompareItem< UINT_HASH_TYPE>* citem = new CompareItem< UINT_HASH_TYPE>(std::move(workItem), 0.0);
-
-                    //these dont need the arrow data, since they are nto being removed later
-                    citem->myHashData->DeleteArrowData();
-                    uniqueItems.push_back(std::move(citem));
+                    hashblocks.AddItem(workItem->hashes.get(), workItem->hashLen);
+                    delete workItem;
+                    workItem = nullptr;
                     continue;
                 }
 
                     //spread the work of comparing across threads..  
                 uint32_t threadsToUse = maxThreadWorkers.load();
-                BS::multi_future<std::pair< CompareItem<UINT_HASH_TYPE>*, bool> > internalCompareThreadFutures;
+                BS::multi_future<bool> internalCompareThreadFutures;
 
-                for (size_t i = 0; i < threadsToUse && workQueue.size() > 0; ++i)
+                //parallelize across blocks, one item at a time
+                uint32_t blocksPerThread = (uint32_t)hashblocks.NumBlocks() / threadsToUse;
+                if (blocksPerThread * threadsToUse < (uint32_t)hashblocks.NumBlocks())
+                    blocksPerThread++;
+
+                uint32_t inclusiveStartInd = 0;
+                uint32_t exclusiveEndInd = blocksPerThread;
+
+                std::stop_source workerThreadStopper;
+
+                CompareItem< UINT_HASH_TYPE>* citem = new CompareItem< UINT_HASH_TYPE>(std::move(workItem), 0.0);
+
+                do
                 {
-                    workItem = std::move(workQueue.front());
-                    workQueue.pop();
-
-                    CompareItem< UINT_HASH_TYPE>* citem = new CompareItem< UINT_HASH_TYPE>(std::move(workItem), 0.0);
-
                     internalCompareThreadFutures.push_back(
-                        threadPool->submit([this, &earlyOut, &dupeThreash, citem]() {
-                            return WorkThreadFunc<UINT_HASH_TYPE>(uniqueItems, earlyOut, dupeThreash, std::move(citem));
+                        threadPool->submit([this, workerThreadStopper, inclusiveStartInd, exclusiveEndInd, &earlyOut, &dupeThreash, citem]() {
+
+                            return WorkThreadFunc<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(workerThreadStopper, hashblocks,
+                                                                                            inclusiveStartInd, exclusiveEndInd, earlyOut, dupeThreash, citem);
                             }
                         )
                     );
-                }
+
+                    inclusiveStartInd += blocksPerThread;
+                    exclusiveEndInd += blocksPerThread;
+
+                    if (hashblocks.NumBlocks() <= exclusiveEndInd)
+                        exclusiveEndInd = (uint32_t)hashblocks.NumBlocks();
+
+                } while (inclusiveStartInd < exclusiveEndInd);
 
                 //wait for worker threads
                 internalCompareThreadFutures.wait();
 
                 //run through each and look at result, if its a dupe, pass it to dupes, if its not, we need to compare all the
-                std::list<CompareItem<UINT_HASH_TYPE>* > potenialKeepers;
+                bool isDupe = false;
                 for (size_t i = 0; i < internalCompareThreadFutures.size(); ++i)
                 {
-                    std::pair< CompareItem<UINT_HASH_TYPE>*, bool> result = internalCompareThreadFutures[i].get();
-                    if (result.second == true)
+                    bool result = internalCompareThreadFutures[i].get();
+                    if (result == true)
                     {
-                        //for processing in the removal of dupes
-                        CompareThreadDupeItem* dupeItem = new CompareThreadDupeItem(result.first->myHashData->arrowData->docId, result.first->myHashData->arrowData->rowNumber);
-                        duplicateItems.push(std::move(dupeItem));
-                        delete result.first;
-                    }
-                    else
-                    {
-                        potenialKeepers.push_back(std::move(result.first));
+                        isDupe = true;
+                        break;
                     }
                 }
 
-                //now, compare all potential keepers against each other...
-                while (potenialKeepers.size() > 0)
+                if (isDupe)
                 {
-                    CompareItem< UINT_HASH_TYPE>* citem = std::move(potenialKeepers.front());
-                    potenialKeepers.pop_front();
-
-                    //compare incoming against all others, update the its max value.
-                    //this wilkl prioritize removing later documents that match, not the first one
-                    for (auto it = potenialKeepers.begin(); it != potenialKeepers.end(); it++)
-                    {
-                        double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
-                            (*it)->myHashData->hashes.get(), (*it)->myHashData->hashLen,
-                            earlyOut);
-
-                        if (match >= dupeThreash)
-                        {
-                            CompareThreadDupeItem* dupeItem = new CompareThreadDupeItem(citem->myHashData->arrowData->docId, citem->myHashData->arrowData->rowNumber);
-                            duplicateItems.push(std::move(dupeItem));
-                            delete citem;
-                            citem = nullptr;
-                            break;
-                        }
-                    }
-
-                    if (citem != nullptr)
-                    {
-                        //these dont need the arrow data, since they are nto being removed later
-                        citem->myHashData->DeleteArrowData();
-                        uniqueItems.push_back(std::move(citem));
-                    }
+                    //for processing in the removal of dupes
+                    CompareThreadDupeItem* dupeItem = new CompareThreadDupeItem(citem->myHashData->arrowData->docId, citem->myHashData->arrowData->rowNumber);
+                    duplicateItems.push(std::move(dupeItem));
+                }
+                else
+                {
+                    hashblocks.AddCompareItem(citem);
                 }
 
-            }
-        }
-    }
+                delete citem;
+                citem = nullptr;
+
+            }//do work
+
+        }//thread running
+
+    }//thread func
 };

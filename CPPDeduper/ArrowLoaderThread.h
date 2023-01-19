@@ -61,6 +61,8 @@ protected:
 
     LockableQueue< ArrowLoaderThreadOutputData* > batchQueue;
 
+    const size_t pushWorkQueueToOutputSize = 200;
+
 public:
     ArrowLoaderThread(uint32_t _maxLoadedRecordsQueued)
         :maxLoadedRecordsQueued(_maxLoadedRecordsQueued)
@@ -104,6 +106,8 @@ public:
 protected:
     arrow::Status StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, int maxCapacity, std::string dataColumnName)
     {
+        std::queue< ArrowLoaderThreadOutputData* > outWorkQueue;
+
         //open file
         std::shared_ptr<arrow::io::RandomAccessFile> input;
         ARROW_ASSIGN_OR_RAISE(input, arrow::io::MemoryMappedFile::Open(path_to_file, arrow::io::FileMode::READ));
@@ -158,7 +162,13 @@ protected:
 #ifdef _DEBUG
                             data->sourceFilePath = path_to_file;
 #endif
-                            batchQueue.push(std::move(data));
+                            outWorkQueue.push(std::move(data));
+
+                            if (outWorkQueue.size() >= pushWorkQueueToOutputSize)
+                            {
+                                //lock and push to outputQueue
+                                batchQueue.push_queue(&outWorkQueue);
+                            }
                         }
                     }
                     batchNum++;
@@ -172,6 +182,10 @@ protected:
                 }
             }
         }
+
+        //lock queue and push to outqueue with whatever remains
+        if(outWorkQueue.size() > 0)
+            batchQueue.push_queue(&outWorkQueue);
 
         arrow::Status status = ipc_reader->Close();
         status = input->Close();

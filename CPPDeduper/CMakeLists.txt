@@ -68,7 +68,7 @@ SET(TARGET_SRC
 
 add_executable (CPPDeduper ${TARGET_SRC} ${TARGET_H}) 
 
-target_link_libraries(CPPDeduper PRIVATE Arrow::arrow_shared)
+target_link_libraries(CPPDeduper PRIVATE Arrow::arrow_static)
 
 set_property(TARGET CPPDeduper PROPERTY CXX_STANDARD 20)
 

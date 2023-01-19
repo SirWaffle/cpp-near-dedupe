@@ -17,6 +17,19 @@ public:
         populatedNotifier.notify_one();
     }
 
+    void push_queue(std::queue<T>* inqueue)
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+
+        while (inqueue->size() > 0)
+        {
+            queue.push(std::move(inqueue->front()));
+            inqueue->pop();
+        }
+
+        populatedNotifier.notify_one();
+    }
+
     bool try_pop(T* item, std::chrono::milliseconds timeout = 1)
     {
         std::unique_lock<std::mutex> lock(mutex);
