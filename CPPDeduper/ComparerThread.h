@@ -25,7 +25,7 @@ struct CompareThreadDupeItem
 template<typename UINT_HASH_TYPE>
 struct CompareItem
 {
-    CompareItem(HasherThreadOutputData< UINT_HASH_TYPE>* _myHashData, double _maxMatchedVal)
+    CompareItem(HasherThreadOutputData< UINT_HASH_TYPE>* _myHashData)
         :myHashData(_myHashData)
     {}
 
@@ -172,7 +172,9 @@ protected:
     std::atomic<uint32_t> maxThreadWorkers;
     BS::thread_pool* threadPool;
     uint32_t workChunkSize;
+    uint64_t comparedItems;
 
+    std::queue<HasherThreadOutputData<UINT_HASH_TYPE>* > workQueue;
 
     LockableQueue< CompareThreadDupeItem* > duplicateItems;
 
@@ -222,10 +224,19 @@ public:
         return &duplicateItems;
     }
 
+    size_t GetRemainingWork()
+    {
+        return workQueue.size();
+    }
+
+    uint64_t GetComparedItems()
+    {
+        return comparedItems;
+    }
+
     void EnterProcFunc(LockableQueue< HasherThreadOutputData<UINT_HASH_TYPE>* >* hashedDataQueue, double earlyOut, double dupeThreash)
     {
-        //this guy needs to compare each incoming hashed data against all prexisting data, gonna be slow.
-        std::queue<HasherThreadOutputData<UINT_HASH_TYPE>* > workQueue;
+        //this guy needs to compare each incoming hashed data against all prexisting data, gonna be slow.        
         HasherThreadOutputData< UINT_HASH_TYPE>* workItem;
 
         while (!m_stop.stop_requested() || hashedDataQueue->Length() > 0)
@@ -238,6 +249,8 @@ public:
 
             while (workQueue.size() > 0)
             {
+                ++comparedItems;
+
                 workItem = workQueue.front();
                 workQueue.pop();
 
@@ -272,7 +285,7 @@ public:
 
                 std::stop_source workerThreadStopper;
 
-                CompareItem< UINT_HASH_TYPE>* citem = new CompareItem< UINT_HASH_TYPE>(std::move(workItem), 0.0);
+                CompareItem< UINT_HASH_TYPE>* citem = new CompareItem< UINT_HASH_TYPE>(std::move(workItem));
                 do
                 {
                     internalCompareThreadFutures.push_back(
@@ -324,7 +337,9 @@ public:
                 }
                 else
                 {
-                    hashblocks.AddCompareItem(citem);
+                    //for testing, add a lot more
+                    for(int i = 0; i < 10000; ++i)
+                        hashblocks.AddCompareItem(citem);
                 }
 
                 delete citem;
