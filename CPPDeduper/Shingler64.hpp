@@ -123,9 +123,7 @@ template<int K, int N>
 class Pipe3Shingler64 {
 public:
     static constexpr int kHashLength = K;
-    static constexpr int kNumHashes = N;
-
-    XXH64_hash_t xxhseed = 0;
+    static constexpr int kNumHashes = N;    
 
     Pipe3Shingler64(XXH64_hash_t _xxhseed) :
         htable_(N * 8),
@@ -253,4 +251,5 @@ public:
 
 private:
     HashTable64 htable_;
+    XXH64_hash_t xxhseed;
 };

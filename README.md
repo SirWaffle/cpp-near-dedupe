@@ -6,10 +6,7 @@ this project was thrown together in a few days and fueled by large amounts of co
 
 # todo
 - LSH bands to reduce total number up comparisons
-- expose and implement wyas to set max memory usage for some tasks ( like file loader ) and more data to track memory usage across stages ( io in, hashing, comparing, io out )
-- change dedupe dupe items to only store the line number, instead of pointer to the dupeItem struct ( RAM savings )
 - replace queues with arrays/vectors/ring buffers where possible ( CPU perf, less memory fragmentation )
-- adjust how compare tasks are assigned to worker threads, its not good right now
 - better ways to track down thread communication slow downs and thread contention issues
 - better readme
 - work stealing to speed up jaccard compare checks when other threads are less busy

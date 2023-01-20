@@ -22,13 +22,13 @@
 */
 
 static constexpr int HASH_LENGTH_SHINGLES = 5; //words used per hash
-static constexpr int NUM_HASHES = 256; //number of hashes for comparison
+//static constexpr int NUM_HASHES = 256; //number of hashes for comparison
 
 const uint64_t expectedDocs = 6000000000; //TODO: make this a parameter
 
 //logic for running a pass of everything
 
-template<typename HASH_TYPE, int HASH_BLOCK_SIZE>
+template<typename HASH_TYPE, int HASH_BLOCK_SIZE, int NUM_HASHES>
 class Runner {
 public:
     Runner()
@@ -126,6 +126,10 @@ public:
         int curLoop = 0;
         int state = 0;
         uint32_t jaccardThreads = comparerThread->GetWorkerThreadCount();
+
+        uint64_t lastCompareCount = 0;
+        auto lastStatusReport = std::chrono::high_resolution_clock::now();
+
         while (true)
         {
             std::this_thread::sleep_for(1s);
@@ -174,14 +178,26 @@ public:
                 if (dupeResolverThreadFuture.wait_for(0ms) == std::future_status::ready)
                     break; //done!
             }
-
+            
             curLoop++;
             if (curLoop >= logEvery)
             {
                 curLoop = 0;
                 auto curTime = std::chrono::high_resolution_clock::now();
-                auto duration = duration_cast<std::chrono::seconds>(curTime - startTime);
-                std::cout << "[ " << duration.count() << "s ] Stats:";
+                auto totalElapsedTime = duration_cast<std::chrono::seconds>(curTime - startTime);
+                auto elapsedSincelastStatus = duration_cast<std::chrono::milliseconds>(curTime - lastStatusReport);
+
+                //calculate velocity of compares...
+                size_t pendingCompare = hashedDataQueue.Length() + comparerThread->GetRemainingWork();
+
+                uint64_t compared = comparerThread->GetComparedItems();
+                double velocity = (double)(compared - lastCompareCount) / (double)elapsedSincelastStatus.count();
+                velocity *= 1000.0;
+
+                lastCompareCount = compared;
+                lastStatusReport = curTime;
+
+                std::cout << "[ " << totalElapsedTime.count() << "s ] Stats:";
 
                 if (state < 1)
                     std::cout << "   [1]Docs Loading: " << arrowLoaderThread->GetTotalDocs();
@@ -193,10 +209,16 @@ public:
                 else
                     std::cout << "   [0]hashing Done!";
 
-                std::cout << "   [" << jaccardThreads << "]Pending Jaccard: " << hashedDataQueue.Length();
+                std::cout << "   [" << jaccardThreads << "]Pending Jaccard: " << pendingCompare;
                 std::cout << "   [" << comparerThread->GetMemUsageMB() << "MB]Unique Docs: " << comparerThread->GetUniqueItemsCount();
                 std::cout << "   Dupe Docs: " << dupeResolverThread->PendingDuplicates();
                 std::cout << std::endl;
+
+                double remainingSeconds = pendingCompare / velocity;
+                std::cout << "Compares per second: " << (uint32_t)velocity << ", estimated time reamining at current speed: " 
+                    << remainingSeconds << " s (" 
+                    << (uint32_t)(remainingSeconds / 60) << " m) "
+                    << " (" << ((remainingSeconds / 60)/60)  << "h)" <<std::endl;
             }
         }
 
@@ -221,14 +243,31 @@ public:
 };
 
 
-#define DO_RUN_AND_RETURN_IF(type,requestedSize,size)         if (requestedSize <= size) \
+#define DO_RUN_AND_RETURN_IF(type,requestedSize,size,numhashes)         if (requestedSize <= size) \
 { \
-    Runner<type, size> runner;\
+    Runner<type, size, numhashes> runner;\
     return runner.Run(inputPath, outPath, dataColumnName, extension,\
         matchThresh, numHasherThreads, maxRecordsLoaded, hashSize);\
 }
 
-
+#define DO_RUN_AND_RETURN_IF_WITH_NUM_HASHES(hashSize,requestedSize,numhashes)  {\
+    if (hashSize == 32)\
+    {\
+        DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 256, numhashes);\
+        DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 512, numhashes);\
+        DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 1024, numhashes);\
+        DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 2048, numhashes);\
+        DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 4096, numhashes);\
+    }\
+    else\
+    {\
+        DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 256, numhashes);\
+        DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 512, numhashes);\
+        DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 1024, numhashes);\
+        DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 2048, numhashes);\
+        DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 4096, numhashes);\
+    }\
+}
 
 
 
@@ -273,6 +312,9 @@ int main(int argc, const char** argv)
     int hashBlockSize = 512; //size of contiguous memory blocks of hashes used in compare thread, best if its cacheable on the cpu
     opt = app.add_option("-b,--hashBlockSize", hashBlockSize, "size of memory blocks of unique hashes, valid values ( 256, 512, 1024, 2048, 4096 )");
 
+    int numHashes = 256; //size of contiguous memory blocks of hashes used in compare thread, best if its cacheable on the cpu
+    opt = app.add_option("-n,--numFIngerprintHashes", numHashes, "number of hashes per minhash fingerprint ( 64, 128, 256 )");
+
     try {
         app.parse(argc, argv);
     }
@@ -281,20 +323,12 @@ int main(int argc, const char** argv)
         return app.exit(e);
     }
     
-    if (hashSize == 32)
-    {
-        DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 256);
-        DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 512);
-        DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 1024);
-        DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 2048);
-        DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 4096);
-    }
-    else
-    {
-        DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 256);
-        DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 512);
-        DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 1024);
-        DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 2048);
-        DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 4096);
-    }
+
+    if (numHashes == 64)
+        DO_RUN_AND_RETURN_IF_WITH_NUM_HASHES(hashSize, hashBlockSize, 64);
+    if(numHashes == 128)
+        DO_RUN_AND_RETURN_IF_WITH_NUM_HASHES(hashSize, hashBlockSize, 128);
+    if(numHashes == 256)
+        DO_RUN_AND_RETURN_IF_WITH_NUM_HASHES(hashSize, hashBlockSize, 256);
+
 }
