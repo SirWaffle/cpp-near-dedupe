@@ -313,7 +313,7 @@ int main(int argc, const char** argv)
     opt = app.add_option("-b,--hashBlockSize", hashBlockSize, "size of memory blocks of unique hashes, valid values ( 256, 512, 1024, 2048, 4096 )");
 
     int numHashes = 256; //size of contiguous memory blocks of hashes used in compare thread, best if its cacheable on the cpu
-    opt = app.add_option("-n,--numFIngerprintHashes", numHashes, "number of hashes per minhash fingerprint ( 64, 128, 256 )");
+    opt = app.add_option("-n,--numFIngerprintHashes", numHashes, "number of hashes per minhash fingerprint ( 4, 8, 32, 64, 128, 256 )");
 
     try {
         app.parse(argc, argv);
@@ -323,7 +323,12 @@ int main(int argc, const char** argv)
         return app.exit(e);
     }
     
-
+    if (numHashes == 4)
+        DO_RUN_AND_RETURN_IF_WITH_NUM_HASHES(hashSize, hashBlockSize, 4);
+    if (numHashes == 8)
+        DO_RUN_AND_RETURN_IF_WITH_NUM_HASHES(hashSize, hashBlockSize, 8);
+    if (numHashes == 32)
+        DO_RUN_AND_RETURN_IF_WITH_NUM_HASHES(hashSize, hashBlockSize, 32);
     if (numHashes == 64)
         DO_RUN_AND_RETURN_IF_WITH_NUM_HASHES(hashSize, hashBlockSize, 64);
     if(numHashes == 128)
