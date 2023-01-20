@@ -65,7 +65,7 @@ class HashBlockAllocator
     //std::vector< Block<UINT_HASH_TYPE, MAX_HASH_LEN / 2, BLOCK_SIZE>* > halfBLocks;
 
 public:
-    HashBlockAllocator(uint32_t initialCapacity)
+    HashBlockAllocator(uint64_t initialCapacity)
     {
         //reserve and add first block to fill
         fullBlocks.reserve(initialCapacity);
@@ -82,7 +82,7 @@ public:
 
     uint64_t NumEntries()
     {
-        return uint64_t(fullBlocks.size() * BLOCK_SIZE) - BLOCK_SIZE + fullBlocks[fullBlocks.size() -1]->size;
+        return uint64_t(fullBlocks.size() * BLOCK_SIZE) - BLOCK_SIZE + fullBlocks[fullBlocks.size() - 1]->size;
     }
 
     size_t NumBlocks()
@@ -120,7 +120,7 @@ public:
 #ifdef __GNUC__
         memcpy(&(b->entries[b->size].hashes), hashes, len * sizeof(UINT_HASH_TYPE));
 #else
-        memcpy_s( &(b->entries[b->size].hashes), MAX_HASH_LEN * sizeof(UINT_HASH_TYPE), hashes, len * sizeof(UINT_HASH_TYPE));
+        memcpy_s(&(b->entries[b->size].hashes), MAX_HASH_LEN * sizeof(UINT_HASH_TYPE), hashes, len * sizeof(UINT_HASH_TYPE));
 #endif
         b->entries[b->size].hashLen = len;
 
@@ -179,12 +179,12 @@ protected:
     HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE> hashblocks;
 
 public:
-    ComparerThread(bool throwOutDupes, uint32_t _workChunkSize, BS::thread_pool* _threadPool, uint32_t maxThreadWorkers = 0)
+    ComparerThread(bool throwOutDupes, uint32_t _workChunkSize, BS::thread_pool* _threadPool, uint64_t maxDocuments, uint32_t maxThreadWorkers = 0)
         :m_throwOutDupes(throwOutDupes),
         maxThreadWorkers(maxThreadWorkers),
         threadPool(_threadPool),
         workChunkSize(_workChunkSize),
-        hashblocks(HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(4096))
+        hashblocks(HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>( (maxDocuments / BLOCK_SIZE) + BLOCK_SIZE))
     {
     }
 
@@ -256,8 +256,16 @@ public:
 
                 //parallelize across blocks, one item at a time
                 uint32_t blocksPerThread = (uint32_t)hashblocks.NumBlocks() / threadsToUse;
-                if (blocksPerThread * threadsToUse < (uint32_t)hashblocks.NumBlocks())
-                    blocksPerThread++;
+                int32_t extraBlocks = 0;
+                if (hashblocks.NumBlocks() > threadsToUse && blocksPerThread * threadsToUse < (uint32_t)hashblocks.NumBlocks())
+                {
+                    extraBlocks = (uint32_t)hashblocks.NumBlocks() - (blocksPerThread * threadsToUse);
+                    blocksPerThread += 1;
+                }
+
+                if (blocksPerThread == 0)
+                    ++blocksPerThread;
+                
 
                 uint32_t inclusiveStartInd = 0;
                 uint32_t exclusiveEndInd = blocksPerThread;
@@ -265,17 +273,25 @@ public:
                 std::stop_source workerThreadStopper;
 
                 CompareItem< UINT_HASH_TYPE>* citem = new CompareItem< UINT_HASH_TYPE>(std::move(workItem), 0.0);
-
                 do
                 {
                     internalCompareThreadFutures.push_back(
                         threadPool->submit([this, workerThreadStopper, inclusiveStartInd, exclusiveEndInd, &earlyOut, &dupeThreash, citem]() {
 
                             return WorkThreadFunc<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(workerThreadStopper, hashblocks,
-                                                                                            inclusiveStartInd, exclusiveEndInd, earlyOut, dupeThreash, citem);
+                            inclusiveStartInd, exclusiveEndInd, earlyOut, dupeThreash, citem);
                             }
                         )
                     );
+
+                    if (extraBlocks > 0)
+                    {
+                        extraBlocks--;
+                        if (extraBlocks == 0)
+                        {
+                            blocksPerThread -= 1;
+                        }
+                    }
 
                     inclusiveStartInd += blocksPerThread;
                     exclusiveEndInd += blocksPerThread;

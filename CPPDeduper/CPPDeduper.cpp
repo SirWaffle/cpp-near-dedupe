@@ -24,7 +24,7 @@
 static constexpr int HASH_LENGTH_SHINGLES = 5; //words used per hash
 static constexpr int NUM_HASHES = 256; //number of hashes for comparison
 
-
+const uint64_t expectedDocs = 6000000000; //TODO: make this a parameter
 
 //logic for running a pass of everything
 
@@ -108,7 +108,7 @@ public:
 
         //comparer
         ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE>* comparerThread =
-            new ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE>(true, 8192, &threadPool, std::max(1U, numThreads - baseThreads));
+            new ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE>(true, 2048, &threadPool, expectedDocs, std::max(1U, numThreads - baseThreads));
 
         //for binary 'dupe or not', we dont need to score, so use the threshval for early out as well
         //hashers have a static queue, one shared across them all

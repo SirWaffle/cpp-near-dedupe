@@ -24,33 +24,13 @@
 //resolves the dupe files, writes out to arrow memory mapped files to mimic hugging faces datasets
 //only processes files completed by the loader thread, so we dont operate on the same files at the same time
 
-struct DupeItem
-{
-    DupeItem(uint32_t _docId, int64_t _rowNumber)
-        :docId(_docId),
-        rowNumber(_rowNumber)
-    {}
-
-    uint32_t docId;
-    int64_t rowNumber;
-};
-
-
-struct compare_batchNums_insert {
-    bool operator() (const DupeItem& first, const DupeItem& second) const
-    {
-        return first.rowNumber < second.rowNumber;
-    }
-};
-
-
 class DupeResolverThread
 {
 protected:
     std::stop_source m_stop;
 
     //for storing duplicate items by file id
-    std::map<uint32_t, std::set<DupeItem, compare_batchNums_insert > > fileIdToDuplicate;
+    std::map<uint32_t, std::set<int64_t > > fileIdToDuplicate;
 
     std::filesystem::path baseInPath;
     std::string baseOutPath;
@@ -132,11 +112,11 @@ public:
                 auto docIdList = fileIdToDuplicate.find(workItem->docId);
                 if (docIdList == fileIdToDuplicate.end())
                 {
-                    fileIdToDuplicate.insert(std::pair{ workItem->docId, std::set<DupeItem, compare_batchNums_insert >({ DupeItem(workItem->docId, workItem->rowNumber) }) } );
+                    fileIdToDuplicate.insert(std::pair{ workItem->docId, std::set<int64_t >({ workItem->rowNumber }) } );
                 }
                 else
                 {
-                    docIdList->second.insert(DupeItem(workItem->docId, workItem->rowNumber));
+                    docIdList->second.insert(workItem->rowNumber);
                 }
             }
         }
@@ -207,7 +187,7 @@ public:
 
 
     protected:
-        arrow::Status CopyFileSansDupes(std::string sourcePath, std::string outPath, std::set<DupeItem, compare_batchNums_insert> sortedDupes)
+        arrow::Status CopyFileSansDupes(std::string sourcePath, std::string outPath, std::set<int64_t> sortedDupes)
         {
             //open the arrow file, stream it in batches, write it in batchs ( if and only if its not in the list of dupes )
 
@@ -245,15 +225,14 @@ public:
                 //calc the actual ronum of the first item
                 if (sortedDupes.size() > 0)
                 {
-                    int64_t dupeRowNumAbsolute = sortedDupes.begin()->rowNumber;
+                    int64_t dupeRowNumAbsolute = *sortedDupes.begin();
                     //dupeRowNumAbsolute += (*sortedDupes.begin())->myHashData->arrowData->rowNum;
                     //row num is the offset of the rows loaded from the batch lodaer, plus the actual rownum in that batch
 
                     //error catch:
                     if (batchLineNumOffset > dupeRowNumAbsolute)
                     {
-                        const DupeItem& compareData = (*sortedDupes.begin());
-                        std::cout << " missed dupe with vals " << compareData.rowNumber;
+                        std::cout << " missed dupe with vals " << dupeRowNumAbsolute;
                     }
 
                     std::vector<std::shared_ptr<arrow::RecordBatch>> batches; //use this to start slicing out the parts we want to keep...
@@ -309,7 +288,7 @@ public:
                                 break;
 
                             //continue removing/skipping items in range
-                            dupeRowNumAbsolute = sortedDupes.begin()->rowNumber;
+                            dupeRowNumAbsolute = *sortedDupes.begin();
                         }
 #if DEBUG_MESSAGES
                         std::cout << "stopped slicing due to dupeabs " << dupeRowNumAbsolute << " is >= batchln " << batchLineNumOffset << " + " << record_batch->num_rows() << std::endl;
