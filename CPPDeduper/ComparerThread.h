@@ -32,9 +32,12 @@ struct CompareItem
     ~CompareItem()
     {
         delete myHashData;
+        delete bucketHashes;
     }
 
     HasherThreadOutputData< UINT_HASH_TYPE>* myHashData;
+    UINT_HASH_TYPE* bucketHashes;
+    uint32_t buckets;
 };
 
 
@@ -136,7 +139,9 @@ public:
 template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
 bool WorkThreadFunc(
     std::stop_source workerThreadStopper,
-    HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>& hashblocks, uint32_t inclusiveStartInd, uint32_t exclusiveEndInd,
+    HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>& hashblocks,
+    HashBlockAllocator<UINT_HASH_TYPE, (MAX_HASH_LEN / 2) + 1, BLOCK_SIZE>& bucketHashes,
+    uint32_t inclusiveStartInd, uint32_t exclusiveEndInd,
     double earlyOut, double dupeThreash, CompareItem<UINT_HASH_TYPE>* citem)
 {
     //compare incoming against all others, update the its max value.
@@ -145,8 +150,26 @@ bool WorkThreadFunc(
     {
         Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* block = hashblocks.GetBlockPtr(blockInd);
 
+        Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* bucketBlock = hashblocks.GetBlockPtr(blockInd);
+
         for (uint32_t hashInd = 0; hashInd < block->size && !workerThreadStopper.stop_requested(); ++hashInd)
         {
+
+            //test to early out on bucket hasesh?      
+            uint32_t count = 0;
+            for (uint32_t bucketHash = 0; bucketHash < citem->buckets; bucketHash++)
+            {
+                if (bucketBlock->entries[hashInd].hashes[bucketHash] == citem->bucketHashes[bucketHash])
+                {
+                    ++count;
+                    if (count > 2)
+                        break;
+                }
+            }
+            if (count <= 2)
+                continue;
+
+
             double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
                 &(block->entries[hashInd].hashes[0]), (int)(block->entries[hashInd].hashLen),
                 earlyOut);
@@ -177,6 +200,7 @@ protected:
     LockableQueue< CompareThreadDupeItem* > duplicateItems;
 
     HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE> hashblocks;
+    HashBlockAllocator<UINT_HASH_TYPE, (MAX_HASH_LEN / 2) + 1, BLOCK_SIZE> bucketHashes;
 
 public:
     ComparerThread(bool throwOutDupes, uint32_t _workChunkSize, BS::thread_pool* _threadPool, uint64_t maxDocuments, uint32_t maxThreadWorkers = 0)
@@ -184,7 +208,8 @@ public:
         maxThreadWorkers(maxThreadWorkers),
         threadPool(_threadPool),
         workChunkSize(_workChunkSize),
-        hashblocks(HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>( (maxDocuments / BLOCK_SIZE) + BLOCK_SIZE))
+        hashblocks(HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>( (maxDocuments / BLOCK_SIZE) + BLOCK_SIZE)),
+        bucketHashes(HashBlockAllocator<UINT_HASH_TYPE, (MAX_HASH_LEN / 2) + 1, BLOCK_SIZE>((maxDocuments / BLOCK_SIZE) + BLOCK_SIZE))
     {
     }
 
@@ -241,16 +266,30 @@ public:
                 workItem = workQueue.front();
                 workQueue.pop();
 
+                CompareItem< UINT_HASH_TYPE>* citem = new CompareItem< UINT_HASH_TYPE>(std::move(workItem), 0.0);
+
+                citem->buckets = 128;
+                citem->bucketHashes = new UINT_HASH_TYPE[citem->buckets];
+
+                //shit hash for testing
+                for (int i = 0, bi = 0; i < MAX_HASH_LEN; i += 2, bi++)
+                {
+                    citem->bucketHashes[bi] = (citem->myHashData->hashes)[i];
+                    citem->bucketHashes[bi] ^= (citem->myHashData->hashes)[i + 1];
+                }
+
+
                 //early out since no checks
                 if (hashblocks.IsEmpty()) [[unlikely]]
                 {
-                    hashblocks.AddItem(workItem->hashes.get(), workItem->hashLen);
-                    delete workItem;
-                    workItem = nullptr;
+                    hashblocks.AddItem(citem->myHashData->hashes.get(), citem->myHashData->hashLen);
+                    bucketHashes.AddItem(citem->bucketHashes, citem->buckets);
+                    delete citem;
+                    citem = nullptr;
                     continue;
                 }
 
-                    //spread the work of comparing across threads..  
+                //spread the work of comparing across threads..  
                 uint32_t threadsToUse = maxThreadWorkers.load();
                 BS::multi_future<bool> internalCompareThreadFutures;
 
@@ -272,13 +311,12 @@ public:
 
                 std::stop_source workerThreadStopper;
 
-                CompareItem< UINT_HASH_TYPE>* citem = new CompareItem< UINT_HASH_TYPE>(std::move(workItem), 0.0);
                 do
                 {
                     internalCompareThreadFutures.push_back(
                         threadPool->submit([this, workerThreadStopper, inclusiveStartInd, exclusiveEndInd, &earlyOut, &dupeThreash, citem]() {
 
-                            return WorkThreadFunc<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(workerThreadStopper, hashblocks,
+                            return WorkThreadFunc<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(workerThreadStopper, hashblocks, bucketHashes,
                             inclusiveStartInd, exclusiveEndInd, earlyOut, dupeThreash, citem);
                             }
                         )
@@ -325,6 +363,7 @@ public:
                 else
                 {
                     hashblocks.AddCompareItem(citem);
+                    bucketHashes.AddItem(citem->bucketHashes, citem->buckets);
                 }
 
                 delete citem;
