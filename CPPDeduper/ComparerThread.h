@@ -8,7 +8,18 @@
 #include <thread>
 
 #include "ThreadPool.h"
+#include "HashTable.h"
+#include "LSHBandHashMap.h"
 
+#include <intrin.h>
+#include <immintrin.h>
+#include <nmmintrin.h>
+#include <emmintrin.h>
+
+
+#define USE_INTRIN true
+#define BUCKETS 64
+#define UINT_BAND_HASH_TYPE uint32_t
 
 struct CompareThreadDupeItem
 {
@@ -38,192 +49,59 @@ struct CompareItem
 };
 
 
-//memory stuff
-template<typename UINT_HASH_TYPE, uint32_t HASH_COUNT>
-struct HashBlockEntry
-{
-    UINT_HASH_TYPE hashes[HASH_COUNT];
-    uint64_t hashLen = 0;
-};
-
-template<typename UINT_HASH_TYPE, uint32_t HASH_COUNT, uint32_t BLOCK_SIZE>
-struct Block
-{
-    UINT_HASH_TYPE size = 0;
-    HashBlockEntry<UINT_HASH_TYPE, HASH_COUNT> entries[BLOCK_SIZE];
-
-};
-
-
-//just test with full blocks for now
-template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
-class HashBlockAllocator
-{
-    //last entry is where we add stuff...
-    std::vector< Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* > fullBlocks;
-    bool empty = true;
-    //std::vector< Block<UINT_HASH_TYPE, MAX_HASH_LEN / 2, BLOCK_SIZE>* > halfBLocks;
-
-public:
-    HashBlockAllocator(uint64_t initialCapacity)
-    {
-        //reserve and add first block to fill
-        fullBlocks.reserve(initialCapacity);
-        fullBlocks.push_back(new Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>());
-    }
-
-    ~HashBlockAllocator()
-    {
-        for (auto block : fullBlocks)
-        {
-            delete block;
-        }
-    }
-
-    uint64_t NumEntries()
-    {
-        return uint64_t(fullBlocks.size() * BLOCK_SIZE) - BLOCK_SIZE + fullBlocks[fullBlocks.size() - 1]->size;
-    }
-
-    size_t NumBlocks()
-    {
-        return fullBlocks.size();
-    }
-
-    uint64_t MemoryUsage()
-    {
-        uint64_t items = uint64_t(fullBlocks.size() * BLOCK_SIZE) - BLOCK_SIZE + fullBlocks[fullBlocks.size() - 1]->size;
-        items *= MAX_HASH_LEN;
-        return items * (uint64_t)sizeof(UINT_HASH_TYPE);
-    }
-
-    bool IsEmpty()
-    {
-        return empty;
-    }
-
-    Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* GetBlockPtr(uint32_t ind)
-    {
-        return fullBlocks[ind];
-    }
-
-    HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* AddCompareItem(CompareItem<UINT_HASH_TYPE>* citem)
-    {
-        return AddItem(citem->myHashData->hashes.get(), citem->myHashData->hashLen);
-    }
-
-    HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* AddItem(UINT_HASH_TYPE* hashes, uint32_t len)
-    {
-        empty = false;
-        Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* b = fullBlocks[fullBlocks.size() - 1];
-
-#ifdef __GNUC__
-        memcpy(&(b->entries[b->size].hashes), hashes, len * sizeof(UINT_HASH_TYPE));
-#else
-        memcpy_s(&(b->entries[b->size].hashes), MAX_HASH_LEN * sizeof(UINT_HASH_TYPE), hashes, len * sizeof(UINT_HASH_TYPE));
-#endif
-
-        HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* entry = &(b->entries[b->size]);
-        b->entries[b->size].hashLen = len;
-
-        b->size++;
-        if (b->size == BLOCK_SIZE)
-        {
-            fullBlocks.push_back(new Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>());
-        }
-
-        return entry;
-    }
-
-};
-
-template<typename UINT_HASH_TYPE, typename UINT_BAND_HASH_TYPE, uint32_t MAX_HASH_LEN>
-class BandHashMap
-{
-    std::unordered_map< UINT_BAND_HASH_TYPE, std::list< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* > > map;
-
-    uint32_t bandSize;
-
-public:
-    BandHashMap(uint64_t _expectedEntries, uint32_t _bandSize)
-        :bandSize(_bandSize)
-    {
-    }
-
-    uint32_t GetBandSize()
-    {
-        return bandSize;
-    }
-
-    //pointers to full hashes?
-    //len must be 16 or less
-    UINT_BAND_HASH_TYPE hashBand(UINT_HASH_TYPE* hash)
-    {
-        UINT_BAND_HASH_TYPE bandHash = 0;
-        //we want collisions, but not for everything. take one random bit from each hash for len...
-        for (size_t i = 0; i < bandSize; ++i)
-        {
-            bandHash = hash[i];
-        }
-
-        return bandHash;
-    }
-
-    void AddToMap(UINT_BAND_HASH_TYPE bandHash, HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* hashEntry)
-    {
-        auto it = map.find(bandHash);
-        if (it == map.end())
-        {
-            auto list = std::list < HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* >();
-            list.push_back(hashEntry);
-
-            auto nit = map.insert(
-                { bandHash, list }
-            );
-        }
-        else
-        {
-            it->second.push_back(hashEntry);
-        }
-    }
-
-    std::list< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* >* GetCollided(UINT_BAND_HASH_TYPE bandHash)
-    {
-        auto it = map.find(bandHash);
-        if (it == map.end())
-            return nullptr;
-        return &(it->second);
-    }
-};
-
 
 template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
 bool WorkThreadFunc(
     std::stop_source workerThreadStopper,
-    HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>& hashblocks,
-    uint32_t inclusiveStartInd, uint32_t exclusiveEndInd,
+    std::vector< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* >* hashesVec,
     double earlyOut, double dupeThreash, CompareItem<UINT_HASH_TYPE>* citem)
 {
     //compare incoming against all others, update the its max value.
     //this will prioritize removing later documents that match, not the first one
-    for (uint32_t blockInd = inclusiveStartInd; blockInd < exclusiveEndInd; blockInd++)
+#if USE_INTRIN
+    __m128i itemflags;
+    itemflags.m128i_i64[0] = citem->myHashData->arrowData->docId;
+    itemflags.m128i_i64[1] = citem->myHashData->arrowData->rowNumber;
+#endif
+
+    for (size_t ind = 0; ind < hashesVec->size() && !workerThreadStopper.stop_requested(); ++ind)
     {
-        Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* block = hashblocks.GetBlockPtr(blockInd);
+        auto& hashes = *(*hashesVec)[ind];
 
-        for (uint32_t hashInd = 0; hashInd < block->size && !workerThreadStopper.stop_requested(); ++hashInd)
+#if USE_INTRIN 
+        __m128i flags = _mm_loadu_si128((__m128i*) (&hashes.flags[0]));
+        __m128i cmp = _mm_cmpeq_epi64(itemflags, flags);
+        if (cmp.m128i_u16[0] != 0 && cmp.m128i_u64[1] != 0)
         {
-            double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
-                &(block->entries[hashInd].hashes[0]), (int)(block->entries[hashInd].hashLen),
-                earlyOut);
+            continue;
+        }
+        else
+        {
+            _mm_storeu_si128((__m128i*) (&hashes.flags[0]), itemflags);
+        }
+#else
+        if (hashes.flags[0] == citem->myHashData->arrowData->docId
+            && hashes.flags[1] == citem->myHashData->arrowData->rowNumber)
+        {
+            continue;
+        }
 
-            if (match >= dupeThreash)
-            {
-                //we are done
-                workerThreadStopper.request_stop();
-                return true;
-            }
+        hashes.flags[0] = citem->myHashData->arrowData->docId;
+        hashes.flags[1] = citem->myHashData->arrowData->rowNumber;
+#endif
+
+
+       double match = JaccardTurbo2(citem->myHashData->hashes.get(), (int)citem->myHashData->hashLen,
+                &hashes.hashes[0], (int)hashes.hashLen, earlyOut);
+
+        if (match >= dupeThreash)
+        {
+            //we are done
+            workerThreadStopper.request_stop();
+            return true;
         }
     }
+
     return false;
 }
 
@@ -245,8 +123,8 @@ protected:
 
     HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE> hashblocks;
 
-#define ITEM_BUCKET_HASHES 256
-    BandHashMap<UINT_HASH_TYPE, uint64_t, MAX_HASH_LEN > bandHashMap;
+    typedef LSHBandHashMap<UINT_HASH_TYPE, UINT_BAND_HASH_TYPE, MAX_HASH_LEN> LSHHashMap;
+    LSHHashMap bandHashMap;
 
 public:
     ComparerThread(bool throwOutDupes, uint32_t _workChunkSize, BS::thread_pool* _threadPool, uint64_t maxDocuments, uint32_t maxThreadWorkers = 0)
@@ -255,7 +133,7 @@ public:
         threadPool(_threadPool),
         workChunkSize(_workChunkSize),
         hashblocks(HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>( (maxDocuments / BLOCK_SIZE) + BLOCK_SIZE)),
-        bandHashMap(BandHashMap<UINT_HASH_TYPE, uint64_t, MAX_HASH_LEN >( ITEM_BUCKET_HASHES / MAX_HASH_LEN) )
+        bandHashMap(LSHHashMap( BUCKETS, MAX_HASH_LEN / BUCKETS ) )
     {
     }
 
@@ -308,9 +186,12 @@ public:
         //this guy needs to compare each incoming hashed data against all prexisting data, gonna be slow.        
         HasherThreadOutputData< UINT_HASH_TYPE>* workItem;
 
+        std::vector< LSHHashMap::BucketHashPointerListPtr> potentialmatchCandidates;
+        potentialmatchCandidates.reserve(MAX_HASH_LEN);
+
         while (!m_stop.stop_requested() || hashedDataQueue->Length() > 0)
         {
-            if (hashedDataQueue->try_pop_range(&workQueue, workChunkSize, 10ms) == 0)
+            if (hashedDataQueue->try_pop_range(&workQueue, workChunkSize, 1000ms) == 0)
             {
                 std::this_thread::sleep_for(25ms);
                 continue;
@@ -323,78 +204,62 @@ public:
                 workItem = workQueue.front();
                 workQueue.pop();
 
+                potentialmatchCandidates.resize(0);
+
+                uint32_t threadsToUse = maxThreadWorkers.load();
+
                 CompareItem< UINT_HASH_TYPE>* citem = new CompareItem< UINT_HASH_TYPE>(std::move(workItem));
 
-                uint64_t bandHashes[ITEM_BUCKET_HASHES]{ 0 };
-                std::list < HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* >* bandMaps[ITEM_BUCKET_HASHES];
+                UINT_BAND_HASH_TYPE bandHashes[BUCKETS];
+                bandHashMap.Hash(citem->myHashData->hashes.get(), citem->myHashData->hashLen, bandHashes);
 
-                for(uint32_t b = 0, hi = 0; b < ITEM_BUCKET_HASHES; b++, hi += bandHashMap.GetBandSize())
+                for(uint32_t b = 0; b < bandHashMap.GetBandSize(); b++)
                 { 
-                    bandHashes[b] = bandHashMap.hashBand(&(citem->myHashData->hashes.get()[hi]));
-                    bandMaps[b] = bandHashMap.GetCollided(bandHashes[b]);
+                    auto matched = bandHashMap.GetCollided(bandHashes[b]);
+                    if(matched != nullptr)
+                        potentialmatchCandidates.push_back( matched  );
                 }
 
                 //early out since no checks
-                if (hashblocks.IsEmpty()) [[unlikely]]
+                if (hashblocks.IsEmpty() || potentialmatchCandidates.size() == 0) [[unlikely]]
                 {
-                    hashblocks.AddItem(citem->myHashData->hashes.get(), citem->myHashData->hashLen);
+                    auto entry = hashblocks.AddItem(citem->myHashData->hashes.get(), citem->myHashData->hashLen);
+                    for (uint32_t b = 0;  b < bandHashMap.GetBandSize(); b++)
+                    {
+                        bandHashMap.AddToMap(bandHashes[b], entry);
+                    }
                     delete citem;
                     citem = nullptr;
                     continue;
                 }
 
                 //spread the work of comparing across threads..  
-                uint32_t threadsToUse = maxThreadWorkers.load();
-                BS::multi_future<bool> internalCompareThreadFutures;
-
-                //parallelize across blocks, one item at a time
-                uint32_t blocksPerThread = (uint32_t)hashblocks.NumBlocks() / threadsToUse;
-                int32_t extraBlocks = 0;
-                if (hashblocks.NumBlocks() > threadsToUse && blocksPerThread * threadsToUse < (uint32_t)hashblocks.NumBlocks())
-                {
-                    extraBlocks = (uint32_t)hashblocks.NumBlocks() - (blocksPerThread * threadsToUse);
-                    blocksPerThread += 1;
-                }
-
-                if (blocksPerThread == 0)
-                    ++blocksPerThread;
                 
-
-                uint32_t inclusiveStartInd = 0;
-                uint32_t exclusiveEndInd = blocksPerThread;
+                BS::multi_future<bool> internalCompareThreadFutures;
 
                 std::stop_source workerThreadStopper;
 
-                do
+                for(int pc = 0; pc < potentialmatchCandidates.size(); ++pc)
                 {
-                    internalCompareThreadFutures.push_back(
-                        threadPool->submit([this, workerThreadStopper, inclusiveStartInd, exclusiveEndInd, &earlyOut, &dupeThreash, citem]() {
+                    auto list = potentialmatchCandidates[pc];
 
-                            return WorkThreadFunc<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(workerThreadStopper, hashblocks,
-                            inclusiveStartInd, exclusiveEndInd, earlyOut, dupeThreash, citem);
+                    internalCompareThreadFutures.push_back(
+                        threadPool->submit([this, workerThreadStopper, list, &earlyOut, &dupeThreash, citem]() {
+
+                            return WorkThreadFunc<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(
+                                workerThreadStopper, list, earlyOut, dupeThreash, citem);
                             }
                         )
-                    );
+                    );                  
+                }
 
-                    if (extraBlocks > 0)
-                    {
-                        extraBlocks--;
-                        if (extraBlocks == 0)
-                        {
-                            blocksPerThread -= 1;
-                        }
-                    }
 
-                    inclusiveStartInd += blocksPerThread;
-                    exclusiveEndInd += blocksPerThread;
 
-                    if (hashblocks.NumBlocks() <= exclusiveEndInd)
-                        exclusiveEndInd = (uint32_t)hashblocks.NumBlocks();
-
-                } while (inclusiveStartInd < exclusiveEndInd);
 
                 //wait for worker threads
                 internalCompareThreadFutures.wait();
+
+
 
                 //run through each and look at result, if its a dupe, pass it to dupes, if its not, we need to compare all the
                 bool isDupe = false;
@@ -417,11 +282,13 @@ public:
                 else
                 {
                     //for testing, add a lot more
+                    /*
 #pragma message("testing code, bad!")
-                    for (int i = 0; i < 1; ++i)
+                    for (int i = 0; i < 1000; ++i)
+                    */
                     {
-                        auto entry = hashblocks.AddCompareItem(citem);
-                        for (int b = 0, hi = 0; b < ITEM_BUCKET_HASHES; b++, hi += ITEM_BUCKET_HASHES)
+                        auto entry = hashblocks.AddItem(citem->myHashData->hashes.get(), citem->myHashData->hashLen);
+                        for (uint32_t b = 0;  b < bandHashMap.GetBandSize(); b++)
                         {
                             bandHashMap.AddToMap(bandHashes[b], entry);
                         }

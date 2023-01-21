@@ -44,12 +44,15 @@ protected:
 
     bool m_validateOutput;
 
+    bool noFileOut;
+
 public:
-    DupeResolverThread(std::filesystem::path _baseInPath, std::string _baseOutPath, uint32_t _workChunkSize, bool _validateOutput)
+    DupeResolverThread(std::filesystem::path _baseInPath, std::string _baseOutPath, uint32_t _workChunkSize, bool _validateOutput, bool _noFileOut)
         :baseInPath(_baseInPath),
         baseOutPath(_baseOutPath),
         workChunkSize(_workChunkSize),
-        m_validateOutput(_validateOutput)
+        m_validateOutput(_validateOutput),
+        noFileOut(_noFileOut)
     {
     }
 
@@ -120,6 +123,9 @@ public:
                 }
             }
         }
+
+        if (noFileOut) //used when testing, dont write files
+            return; 
 
         //we can be super safe and handle removing the dupes after we have finished processing them all...
         //not as fast, but safe. do this for now, then improve it later

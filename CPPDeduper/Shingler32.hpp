@@ -159,8 +159,6 @@ public:
                     // //UB optimization maybe? count is off in release mode
                     //warning C4333: '>>': right shift by too large amount, data loss
                     hashes[k] = hashes[k] ^ (c >> 16);
-#pragma message("figure out hashing warning")
-                    //hashes[k] = hashes[k] ^ (c << 16);
 
                     hashes[k] = hashes[k] * 16777619;
                 }

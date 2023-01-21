@@ -35,7 +35,7 @@ public:
     {}
 
     int Run(std::string inputPath, std::string outPath, std::string dataColumnName, std::string extension,
-        double matchThresh, int numHasherThreads, int maxRecordsLoaded, int hashSize)
+        double matchThresh, int numHasherThreads, int maxRecordsLoaded, int hashSize, bool noFileOut)
     {
         std::filesystem::path basePath = inputPath;
 
@@ -116,7 +116,7 @@ public:
             comparerThread, &hashedDataQueue, /*JACCARD_EARLY_OUT*/ matchThresh, matchThresh);
 
         //and as the comparer spits out the dupes, we can start removing them from the datasets...
-        DupeResolverThread* dupeResolverThread = new DupeResolverThread(basePath, outPath, 4096, false);
+        DupeResolverThread* dupeResolverThread = new DupeResolverThread(basePath, outPath, 4096, false, noFileOut);
         std::future<void> dupeResolverThreadFuture = threadPool.submit(&DupeResolverThread::EnterProcFunc, dupeResolverThread, comparerThread->GetOutputQueuePtr(), &fileNamesVector);
 
 
@@ -243,29 +243,27 @@ public:
 };
 
 
-#define DO_RUN_AND_RETURN_IF(type,requestedSize,size,numhashes)         if (requestedSize <= size) \
+#define DO_RUN_AND_RETURN_IF(type,hashBlockSize,size,numhashes)         if (hashBlockSize <= size) \
 { \
     Runner<type, size, numhashes> runner;\
     return runner.Run(inputPath, outPath, dataColumnName, extension,\
-        matchThresh, numHasherThreads, maxRecordsLoaded, hashSize);\
+        matchThresh, numHasherThreads, maxRecordsLoaded, hashSize, noFileOut);\
 }
 
-#define DO_RUN_AND_RETURN_IF_WITH_NUM_HASHES(hashSize,requestedSize,numhashes)  {\
+#define DO_RUN_AND_RETURN_IF_WITH_NUM_HASHES(hashSize,hashBlockSize,numhashes)  {\
     if (hashSize == 32)\
     {\
         DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 256, numhashes);\
         DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 512, numhashes);\
         DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 1024, numhashes);\
-        DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 2048, numhashes);\
-        DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 4096, numhashes);\
+        DO_RUN_AND_RETURN_IF(uint32_t, hashBlockSize, 524288, numhashes);\
     }\
     else\
     {\
         DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 256, numhashes);\
         DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 512, numhashes);\
         DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 1024, numhashes);\
-        DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 2048, numhashes);\
-        DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 4096, numhashes);\
+        DO_RUN_AND_RETURN_IF(uint64_t, hashBlockSize, 524288, numhashes);\
     }\
 }
 
@@ -309,11 +307,14 @@ int main(int argc, const char** argv)
     int hashSize = 64; //hash key size
     opt = app.add_option("-s,--hashSize", hashSize, "hash size in bits, valid values ( 32 or 64 )");
 
-    int hashBlockSize = 512; //size of contiguous memory blocks of hashes used in compare thread, best if its cacheable on the cpu
-    opt = app.add_option("-b,--hashBlockSize", hashBlockSize, "size of memory blocks of unique hashes, valid values ( 256, 512, 1024, 2048, 4096 )");
+    int hashBlockSize = 524288; //size of contiguous memory blocks of hashes
+    opt = app.add_option("-b,--hashBlockSize", hashBlockSize, "size of memory blocks of unique hashes, valid values ( 256, 512, 1024, 524288 )");
 
     int numHashes = 256; //size of contiguous memory blocks of hashes used in compare thread, best if its cacheable on the cpu
     opt = app.add_option("-n,--numFIngerprintHashes", numHashes, "number of hashes per minhash fingerprint ( 64, 128, 256 )");
+
+    bool noFileOut = true;
+    opt = app.add_option("-q,--noFileOut", noFileOut, "dotn write out deduped files, useful for testing");
 
     try {
         app.parse(argc, argv);
