@@ -202,7 +202,7 @@ double JaccardTurbo2(const uint32_t* fng1, int len1, const uint32_t* fng2, int l
         __m128i v2 = _mm_loadu_si128((const __m128i*)(fng2 + pos2));
         __m128i cmp = _mm_cmpeq_epi64(v1, v2);
 
-        if (cmp.m128i_u64[0] != 0 || cmp.m128i_u64[1] != 0) {
+        if (_mm_extract_epi64(cmp, 0) != 0 || _mm_extract_epi64(cmp, 1) != 0) {
             for (int i = 0; i < 4; i++) {
                 if (fng1[pos1] == fng2[pos2]) {
                     nintersect++;
@@ -263,7 +263,7 @@ double JaccardTurbo2(const uint64_t* fng1, int len1, const uint64_t* fng2, int l
         __m128i v2 = _mm_loadu_si128((const __m128i*)(fng2 + pos2));
         __m128i cmp = _mm_cmpeq_epi64(v1, v2);
 
-        if (cmp.m128i_u64[0] != 0 || cmp.m128i_u64[1] != 0) {
+        if (_mm_extract_epi64(cmp, 0) != 0 || _mm_extract_epi64(cmp, 1) != 0) {
             for (int i = 0; i < 2; i++) {
                 if (fng1[pos1] == fng2[pos2]) {
                     nintersect++;
@@ -310,7 +310,7 @@ double JaccardTurbo2(const uint64_t* fng1, int len1, const uint64_t* fng2, int l
     int nunion = len1 + len2 - nintersect;
     return nintersect / (double)nunion;
 }
-
+/*
 
 double JaccardTurboAVX(const uint32_t* fng1, int len1, const uint32_t* fng2, int len2, double alpha)
 {
@@ -376,4 +376,4 @@ double JaccardTurboAVX(const uint64_t* fng1, int len1, const uint64_t* fng2, int
 
     int nunion = len1 + len2 - nintersect;
     return nintersect / (double)nunion;
-}
+}*/

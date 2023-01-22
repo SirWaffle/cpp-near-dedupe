@@ -27,9 +27,11 @@ class HashBlockAllocator
     //last entry is where we add stuff...
     std::list< Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* > fullBlocks;
     bool empty = true;
+    uint64_t initialCapacity;
 
 public:
-    HashBlockAllocator(uint64_t initialCapacity)
+    HashBlockAllocator(uint64_t _initialCapacity)
+        :initialCapacity(_initialCapacity)
     {
         //reserve and add first block to fill
         fullBlocks.push_back(new Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>());

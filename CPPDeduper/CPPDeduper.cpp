@@ -35,7 +35,7 @@ public:
     {}
 
     int Run(std::string inputPath, std::string outPath, std::string dataColumnName, std::string extension,
-        double matchThresh, int numHasherThreads, int maxRecordsLoaded, int hashSize, bool noFileOut)
+        double matchThresh, int numHasherThreads, int maxRecordsLoaded, int hashSize, bool noFileOut, uint32_t numBuckets)
     {
         std::filesystem::path basePath = inputPath;
 
@@ -108,7 +108,7 @@ public:
 
         //comparer
         ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE>* comparerThread =
-            new ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE>(true, 2048, &threadPool, expectedDocs, std::max(1U, numThreads - baseThreads));
+            new ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE>(true, 2048, &threadPool, expectedDocs, numBuckets, std::max(1U, numThreads - baseThreads));
 
         //for binary 'dupe or not', we dont need to score, so use the threshval for early out as well
         //hashers have a static queue, one shared across them all
@@ -247,7 +247,7 @@ public:
 { \
     Runner<type, size, numhashes> runner;\
     return runner.Run(inputPath, outPath, dataColumnName, extension,\
-        matchThresh, numHasherThreads, maxRecordsLoaded, hashSize, noFileOut);\
+        matchThresh, numHasherThreads, maxRecordsLoaded, hashSize, noFileOut, numBuckets);\
 }
 
 #define DO_RUN_AND_RETURN_IF_WITH_NUM_HASHES(hashSize,hashBlockSize,numhashes)  {\
@@ -311,10 +311,13 @@ int main(int argc, const char** argv)
     opt = app.add_option("-b,--hashBlockSize", hashBlockSize, "size of memory blocks of unique hashes, valid values ( 256, 512, 1024, 524288 )");
 
     int numHashes = 256; //size of contiguous memory blocks of hashes used in compare thread, best if its cacheable on the cpu
-    opt = app.add_option("-n,--numFIngerprintHashes", numHashes, "number of hashes per minhash fingerprint ( 64, 128, 256 )");
+    opt = app.add_option("-n,--numFingerprintHashes", numHashes, "number of hashes per minhash fingerprint ( 64, 128, 256 )");
 
     bool noFileOut = true;
-    opt = app.add_option("-q,--noFileOut", noFileOut, "dotn write out deduped files, useful for testing");
+    opt = app.add_option("-q,--noFileOut", noFileOut, "dont write out deduped files, useful for testing");
+
+    uint32_t numBuckets = 128;
+    opt = app.add_option("-l,--buckets", numBuckets, "LSH buckets ( numHash (default 256) must be divisible by numBuckets evenly )");
 
     try {
         app.parse(argc, argv);
