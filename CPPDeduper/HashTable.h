@@ -26,11 +26,12 @@ class HashBlockAllocator
 {
 public:
     typedef std::list< Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* >::iterator iterator;
-
+    
 
 public:
     HashBlockAllocator(uint64_t _initialCapacity)
-        :initialCapacity(_initialCapacity)
+        :initialCapacity(_initialCapacity),
+        numEntries(0)
     {
         //reserve and add first block to fill
         fullBlocks.push_back(new Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>());
@@ -44,7 +45,7 @@ public:
 
     uint64_t NumEntries()
     {
-        return uint64_t(fullBlocks.size() * BLOCK_SIZE) - BLOCK_SIZE + fullBlocks.back()->size;
+        return numEntries;
     }
 
     size_t NumBlocks()
@@ -76,6 +77,8 @@ public:
 
     HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* AddItem(UINT_HASH_TYPE* hashes, uint32_t len)
     {
+        ++numEntries;
+
         empty = false;
         Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* b = fullBlocks.back();
 
@@ -103,5 +106,6 @@ private:
     std::list< Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* > fullBlocks;
     bool empty = true;
     uint64_t initialCapacity;
+    uint64_t numEntries = 0;
 };
 

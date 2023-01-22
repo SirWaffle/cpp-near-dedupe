@@ -36,9 +36,9 @@ protected:
     std::string baseOutPath;
 
     //some stats
-    uint32_t pendingDuplicates = 0;
-    uint32_t totalDuplicates = 0;
-    uint32_t totalDuplicatesSkipped = 0;
+    uint64_t pendingDuplicates = 0;
+    uint64_t totalDuplicates = 0;
+    uint64_t totalDuplicatesSkipped = 0;
 
     uint32_t workChunkSize;
 
@@ -70,19 +70,24 @@ public:
         m_stop.request_stop();
     }
 
-    uint32_t TotalDupes()
+    uint64_t TotalDupes()
     {
         return totalDuplicates;
     }
 
-    uint32_t TotalDupesRemoved()
+    uint64_t TotalDupesRemoved()
     {
         return totalDuplicatesSkipped;
     }
 
-    uint32_t PendingDuplicates()
+    uint64_t PendingDuplicates()
     {
         return pendingDuplicates;
+    }
+
+    uint64_t GetEstimatedDupeMemeroyUsageMB()
+    {
+        return (pendingDuplicates * sizeof(int64_t)) / (1024UL * 1024UL);
     }
 
     void EnterProcFunc(LockableQueue< CompareThreadDupeItem* >* duplicates, 

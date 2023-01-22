@@ -108,12 +108,16 @@ public:
         }
 
         //comparer
-        ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE>* comparerThread =
-            new ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE>(true, 2048, &threadPool, expectedDocs, numBuckets, std::max(1U, numThreads - baseThreads));
+#define LSH_KEY_TYPE uint64_t
+        typename LSHBandHashMap<HASH_TYPE, LSH_KEY_TYPE, NUM_HASHES>::LSH_TYPE_ENUM lshType;
+        lshType = LSHBandHashMap<HASH_TYPE, LSH_KEY_TYPE, NUM_HASHES>::RANDOM_BIT;
+
+        ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE, LSH_KEY_TYPE>* comparerThread =
+            new ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE, LSH_KEY_TYPE>(true, 2048, &threadPool, expectedDocs, numBuckets, lshType, std::max(1U, numThreads - baseThreads));
 
         //for binary 'dupe or not', we dont need to score, so use the threshval for early out as well
         //hashers have a static queue, one shared across them all
-        std::future<void> comparerThreadFuture = threadPool.submit(&ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE>::EnterProcFunc,
+        std::future<void> comparerThreadFuture = threadPool.submit(&ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE, LSH_KEY_TYPE>::EnterProcFunc,
             comparerThread, &hashedDataQueue, /*JACCARD_EARLY_OUT*/ matchThresh, matchThresh);
 
         //and as the comparer spits out the dupes, we can start removing them from the datasets...
@@ -198,6 +202,7 @@ public:
                 lastCompareCount = compared;
                 lastStatusReport = curTime;
 
+                std::cout << std::endl;
                 std::cout << "[ " << totalElapsedTime.count() << "s ] Stats:";
 
                 if (state < 1)
@@ -210,9 +215,7 @@ public:
                 else
                     std::cout << "   [0]hashing Done!";
 
-                std::cout << "   [" << jaccardThreads << "]Pending Jaccard: " << pendingCompare;
-                std::cout << "   [" << comparerThread->GetMemUsageMB() << "MB]Unique Docs: " << comparerThread->GetUniqueItemsCount();
-                std::cout << "   Dupe Docs: " << dupeResolverThread->PendingDuplicates();
+                std::cout << "   [" << jaccardThreads << "]Pending Jaccard: " << pendingCompare;                
                 std::cout << std::endl;
 
                 double remainingSeconds = pendingCompare / velocity;
@@ -220,6 +223,9 @@ public:
                     << remainingSeconds << " s (" 
                     << (uint32_t)(remainingSeconds / 60) << " m) "
                     << " (" << ((remainingSeconds / 60)/60)  << "h)" <<std::endl;
+                std::cout << "Unique Docs: " << comparerThread->GetUniqueItemsCount() << "    estimated memory usage MB: " << comparerThread->GetMemUsageMB() << std::endl;
+                std::cout << "Dupe Docs: " << dupeResolverThread->PendingDuplicates() << "   estimated memory usage MB: " << dupeResolverThread->GetEstimatedDupeMemeroyUsageMB() << std::endl;
+                std::cout << "Number of LSH entries: " << comparerThread->GetNumLSHEntries() << "   estimated memory usage MB: " << comparerThread->GetEstimatedLSHMemoryUsageMB() << std::endl;
             }
         }
 
@@ -299,7 +305,7 @@ int main(int argc, const char** argv)
     opt = app.add_option("-j,--jaccardSim", matchThresh, "min jaccard similarity value ( 0.0 to 1.0 )");
 
     //thread counts
-    int numHasherThreads = 10; // 4; //more threads crunch through mroe input faster
+    int numHasherThreads = 7; // 4; //more threads crunch through mroe input faster
     opt = app.add_option("-t,--hashThreads", numHasherThreads, "threads dedicated to hashing");
 
     int maxRecordsLoaded = 4096 * 48; //the higher this is, the higher memory usage can get
