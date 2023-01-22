@@ -16,7 +16,7 @@
 #include <emmintrin.h>
 
 
-#define LOAD_TEST true
+#define LOAD_TEST false
 
 #define ALREADY_PROCESSED_CHECK true
 #define USE_INTRIN true
@@ -186,14 +186,14 @@ protected:
     LSHHashMap bandHashMap;
 
 public:
-    ComparerThread(bool throwOutDupes, uint32_t _workChunkSize, BS::thread_pool* _threadPool, uint64_t maxDocuments, uint32_t buckets, LSHHashMap::LSH_TYPE_ENUM lshType, uint32_t maxThreadWorkers = 0)
+    ComparerThread(bool throwOutDupes, uint32_t _workChunkSize, BS::thread_pool* _threadPool, uint64_t maxDocuments, uint32_t bands, uint64_t buckets, LSHHashMap::LSH_TYPE_ENUM lshType, uint32_t maxThreadWorkers = 0)
         :m_throwOutDupes(throwOutDupes),
         maxThreadWorkers(maxThreadWorkers),
         threadPool(_threadPool),
         workChunkSize(_workChunkSize),
         comparedItems(0),
         hashblocks(HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>( (maxDocuments / BLOCK_SIZE) + BLOCK_SIZE)),
-        bandHashMap( LSHHashMap(buckets, lshType))
+        bandHashMap( LSHHashMap(bands, buckets, lshType))
     {
     }
 
@@ -257,7 +257,7 @@ public:
         HasherThreadOutputData< UINT_HASH_TYPE>* workItem;
 
         std::vector<UINT_BAND_HASH_TYPE> bandHashes;
-        bandHashes.resize(bandHashMap.GetBuckets());
+        bandHashes.resize(bandHashMap.GetBands());
 
         std::vector< std::vector< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* >* > potentialmatchCandidates;
         potentialmatchCandidates.reserve(MAX_HASH_LEN);
