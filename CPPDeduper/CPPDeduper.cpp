@@ -9,6 +9,7 @@
 
 #include "DupeResolverThread.h"
 #include "ComparerThread.h"
+#include "ComparerThreadBruteForce.h"
 #include "HasherThread.h"
 #include "ArrowLoaderThread.h"
 #include "LockableQueue.h"
@@ -316,7 +317,7 @@ int main(int argc, const char** argv)
     bool noFileOut = true;
     opt = app.add_option("-q,--noFileOut", noFileOut, "dont write out deduped files, useful for testing");
 
-    uint32_t numBuckets = 128;
+    uint32_t numBuckets = 32;
     opt = app.add_option("-l,--buckets", numBuckets, "LSH buckets ( numHash (default 256) must be divisible by numBuckets evenly )");
 
     try {

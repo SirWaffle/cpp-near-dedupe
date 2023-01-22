@@ -12,6 +12,7 @@
 
 namespace BruteForce
 {
+    /*
     struct CompareThreadDupeItem
     {
         CompareThreadDupeItem(uint32_t _docId, int64_t _rowNumber)
@@ -22,7 +23,7 @@ namespace BruteForce
         uint32_t docId;
         int64_t rowNumber;
     };
-
+    */
 
     template<typename UINT_HASH_TYPE>
     struct CompareItem
@@ -39,7 +40,8 @@ namespace BruteForce
         HasherThreadOutputData< UINT_HASH_TYPE>* myHashData;
     };
 
-
+    //using vector container
+    /*
     template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
     bool WorkThreadFunc(
         std::stop_source workerThreadStopper,
@@ -51,6 +53,37 @@ namespace BruteForce
         for (uint32_t blockInd = inclusiveStartInd; blockInd < exclusiveEndInd; blockInd++)
         {
             Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* block = hashblocks.GetBlockPtr(blockInd);
+
+            for (uint32_t hashInd = 0; hashInd < block->size && !workerThreadStopper.stop_requested(); ++hashInd)
+            {
+                double match = JaccardTurbo(citem->myHashData->hashes.get(), citem->myHashData->hashLen,
+                    &(block->entries[hashInd].hashes[0]), (int)(block->entries[hashInd].hashLen),
+                    earlyOut);
+
+                if (match >= dupeThreash)
+                {
+                    //we are done
+                    workerThreadStopper.request_stop();
+                    return true;
+                }
+            }
+        }
+        return false;
+    }*/
+
+    //list container refactor
+    template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
+    bool BruteForceWorkThreadFunc(
+        std::stop_source workerThreadStopper,
+        typename HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>::iterator start,
+        typename HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>::iterator exclusiveEnd,
+        double earlyOut, double dupeThreash, CompareItem<UINT_HASH_TYPE>* citem)
+    {
+        //compare incoming against all others, update the its max value.
+        //this will prioritize removing later documents that match, not the first one
+        for (; start < exclusiveEnd; start++)
+        {
+            Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* block = *start;
 
             for (uint32_t hashInd = 0; hashInd < block->size && !workerThreadStopper.stop_requested(); ++hashInd)
             {
@@ -88,7 +121,7 @@ namespace BruteForce
         HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE> hashblocks;
 
     public:
-        ComparerThread(bool throwOutDupes, uint32_t _workChunkSize, BS::thread_pool* _threadPool, uint64_t maxDocuments, uint32_t maxThreadWorkers = 0)
+        ComparerThread(bool throwOutDupes, uint32_t _workChunkSize, BS::thread_pool* _threadPool, uint32_t numBuckets, uint64_t maxDocuments, uint32_t maxThreadWorkers = 0)
             :m_throwOutDupes(throwOutDupes),
             maxThreadWorkers(maxThreadWorkers),
             threadPool(_threadPool),
@@ -195,11 +228,15 @@ namespace BruteForce
                     CompareItem< UINT_HASH_TYPE>* citem = new CompareItem< UINT_HASH_TYPE>(std::move(workItem));
                     do
                     {
+                        //TODO bad perf here but this is just for testing for now...
                         internalCompareThreadFutures.push_back(
                             threadPool->submit([this, workerThreadStopper, inclusiveStartInd, exclusiveEndInd, &earlyOut, &dupeThreash, citem]() {
+                            
+                                typename HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>::iterator start = hashblocks.Begin() + inclusiveStartInd;
+                                typename HashBlockAllocator<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>::iterator end = hashblocks.Begin() + exclusiveEndInd;
 
-                                return WorkThreadFunc<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(workerThreadStopper, hashblocks,
-                                inclusiveStartInd, exclusiveEndInd, earlyOut, dupeThreash, citem);
+                                return BruteForceWorkThreadFunc<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(workerThreadStopper,
+                                        start, end, earlyOut, dupeThreash, citem);
                                 }
                             )
                         );
@@ -246,7 +283,7 @@ namespace BruteForce
                     {
                         //for testing, add a lot more
                         for (int i = 0; i < 10000; ++i)
-                            hashblocks.AddCompareItem(citem);
+                            hashblocks.AddItem(citem->myHashData->hashes.get(), citem->myHashData->hashLen);
                     }
 
                     delete citem;

@@ -18,7 +18,7 @@
 
 #define ALREADY_PROCESSED_CHECK true
 #define USE_INTRIN true
-#define UINT_BAND_HASH_TYPE uint32_t
+#define UINT_BAND_HASH_TYPE uint64_t
 
 struct CompareThreadDupeItem
 {
@@ -48,7 +48,7 @@ struct CompareItem
 };
 
 
-
+/*
 template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
 bool WorkThreadFunc(
     std::stop_source workerThreadStopper,
@@ -102,13 +102,13 @@ bool WorkThreadFunc(
 
     return false;
 }
-
+*/
 
 
 template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
 bool WorkThreadFunc(
     std::stop_source workerThreadStopper,
-    HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* hashesVec, size_t numhashes,
+    typename std::vector< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* >::iterator hashesVec, size_t numhashes,
     double earlyOut, double dupeThreash, CompareItem<UINT_HASH_TYPE>* citem)
 {
     //compare incoming against all others, update the its max value.
@@ -117,12 +117,15 @@ bool WorkThreadFunc(
     __m128i itemflags = _mm_set_epi64x(citem->myHashData->arrowData->docId, citem->myHashData->arrowData->rowNumber);
 #endif
 
+    //for debugging...
+    auto ptrcpy = hashesVec;
+
     for (size_t ind = 0; ind < numhashes && !workerThreadStopper.stop_requested(); ++ind, ++hashesVec)
     {
-        auto& hashes = *hashesVec;
+        auto hashes = *hashesVec;
 
 #if USE_INTRIN 
-        __m128i flags = _mm_loadu_si128((__m128i*) (&hashes.flags[0]));
+        __m128i flags = _mm_loadu_si128((__m128i*) (&hashes->flags[0]));
         __m128i cmp = _mm_cmpeq_epi64(itemflags, flags);
 
         if (_mm_extract_epi64(cmp, 0) != 0 && _mm_extract_epi64(cmp, 1) != 0)
@@ -131,7 +134,7 @@ bool WorkThreadFunc(
         }
         else
         {
-            _mm_storeu_si128((__m128i*) (&hashes.flags[0]), itemflags);
+            _mm_storeu_si128((__m128i*) (&hashes->flags[0]), itemflags);
         }
 #else
         if (hashes.flags[0] == citem->myHashData->arrowData->docId
@@ -146,7 +149,7 @@ bool WorkThreadFunc(
 
 
         double match = JaccardTurbo2(citem->myHashData->hashes.get(), (int)citem->myHashData->hashLen,
-            &hashes.hashes[0], (int)hashes.hashLen, earlyOut);
+            &hashes->hashes[0], (int)hashes->hashLen, earlyOut);
 
         if (match >= dupeThreash)
         {
@@ -297,14 +300,16 @@ public:
 
                 std::stop_source workerThreadStopper;
 
+                const int singleThreadSize = 4096; // 4096;
+
                 //check if we should jsut do the whole thing on one thread...
                 bool matched = false;
-                if (totalPotentialCandidates < 4096) //faster not to wait on threads and locks and all that
+                if (totalPotentialCandidates < singleThreadSize) //faster not to wait on threads and locks and all that
                 {
-                    for (size_t pc = 0; pc < potentialmatchCandidates.size() && matched == false; ++pc)
+                    for (size_t pc = 0; pc < potentialmatchCandidates.size() && matched == false && !workerThreadStopper.stop_requested(); ++pc)
                     {
                         auto list = potentialmatchCandidates[pc];
-                        auto ptr = (*list)[0];
+                        auto ptr = list->begin();
                         size_t len = list->size();
 
                         matched = WorkThreadFunc<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(
@@ -313,13 +318,13 @@ public:
                 }
                 else
                 {
-                    for (size_t pc = 0; pc < potentialmatchCandidates.size(); ++pc)
+                    for (size_t pc = 0; pc < potentialmatchCandidates.size() && !workerThreadStopper.stop_requested(); ++pc)
                     {
                         auto list = potentialmatchCandidates[pc];
 
-                        if (list->size() < 4096 * 2) //no need to slice
+                        if (list->size() < singleThreadSize * 2) //no need to slice
                         {
-                            auto ptr = (*list)[0];
+                            auto ptr = list->begin();
                             size_t len = list->size();
 
                             internalCompareThreadFutures.push_back(
@@ -334,14 +339,15 @@ public:
                         else //slice into more managable peices
                         {
                             //should chunkify these vectors as well, since some can be much longer than others
-                            size_t sliceLen = 4096 * 2;
-                            for (size_t slice = 0; slice < list->size(); slice += sliceLen)
+                            size_t sliceLen = singleThreadSize * 2;
+                            for (size_t slice = 0; slice < list->size() && !workerThreadStopper.stop_requested(); slice += sliceLen)
                             {
                                 size_t len = sliceLen;
                                 if (slice + len >= list->size())
                                     len = list->size() - slice;
 
-                                auto ptr = (*list)[slice];
+                                //only good for vectors, will need to change with lists
+                                auto ptr = list->begin() + slice;
 
                                 internalCompareThreadFutures.push_back(
                                     threadPool->submit([this, workerThreadStopper, ptr, len, &earlyOut, &dupeThreash, citem]() {
@@ -381,7 +387,7 @@ public:
                     //for testing, add a lot more
                     
 //#pragma message("testing code, bad!")
-                    //for (int i = 0; i < 10000; ++i)
+                   // for (int i = 0; i < 1000; ++i)
                     
                     {
                         auto entry = hashblocks.AddItem(citem->myHashData->hashes.get(), citem->myHashData->hashLen);
