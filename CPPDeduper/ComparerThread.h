@@ -323,10 +323,16 @@ public:
                     {
                         auto list = potentialmatchCandidates[pc];
 
-                        if (list->size() < singleThreadSize * 2) //no need to slice
+                        //should chunkify these vectors as well, since some can be much longer than others
+                        size_t sliceLen = singleThreadSize * 2;
+                        for (size_t slice = 0; slice < list->size() && !workerThreadStopper.stop_requested(); slice += sliceLen)
                         {
-                            auto ptr = list->begin();
-                            size_t len = list->size();
+                            size_t len = sliceLen;
+                            if (slice + len >= list->size())
+                                len = list->size() - slice;
+
+                            //only good for vectors, will need to change with lists
+                            auto ptr = list->begin() + slice;
 
                             internalCompareThreadFutures.push_back(
                                 threadPool->submit([this, workerThreadStopper, ptr, len, &earlyOut, &dupeThreash, citem]() {
@@ -337,30 +343,6 @@ public:
                                 )
                             );
                         }
-                        else //slice into more managable peices
-                        {
-                            //should chunkify these vectors as well, since some can be much longer than others
-                            size_t sliceLen = singleThreadSize * 2;
-                            for (size_t slice = 0; slice < list->size() && !workerThreadStopper.stop_requested(); slice += sliceLen)
-                            {
-                                size_t len = sliceLen;
-                                if (slice + len >= list->size())
-                                    len = list->size() - slice;
-
-                                //only good for vectors, will need to change with lists
-                                auto ptr = list->begin() + slice;
-
-                                internalCompareThreadFutures.push_back(
-                                    threadPool->submit([this, workerThreadStopper, ptr, len, &earlyOut, &dupeThreash, citem]() {
-
-                                        return WorkThreadFunc<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(
-                                            workerThreadStopper, ptr, len, earlyOut, dupeThreash, citem);
-                                        }
-                                    )
-                                );
-                            }
-                        }
-
 
                     }
 

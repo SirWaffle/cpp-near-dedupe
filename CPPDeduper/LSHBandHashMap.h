@@ -372,6 +372,20 @@ public:
         return totalPotentialCandidates;
     }
 
+    size_t GetCollidedSet(std::vector<UINT_BAND_HASH_TYPE>::iterator bandHashes, std::unordered_set< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* >& matches)
+    {
+        for (uint32_t b = 0; b < bands; b++, bandHashes++)
+        {
+            auto matched = GetCollided(b, *bandHashes);
+            if (matched != nullptr)
+            {
+                matches.insert(matched->begin(), matched->end());
+            }
+        }
+
+        return matches.size();
+    }
+
     BucketHashPointerList* GetCollided(size_t bucketNum, UINT_BAND_HASH_TYPE bandHash)
     {
         auto it = hashMaps[bucketNum].find(bandHash);
