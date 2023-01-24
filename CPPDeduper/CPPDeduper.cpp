@@ -357,7 +357,7 @@ int main(int argc, const char** argv)
     int numHashes = 256; 
     opt = app.add_option("-n,--numMinhashKeys", numHashes, "number of hashes per minhash fingerprint ( 64, 128, 256 )");
 
-    bool noFileOut = true;
+    bool noFileOut = false;
     opt = app.add_option("-q,--noFileOut", noFileOut, "dont write out deduped files, useful for testing");
 
     uint32_t numBands = 64;
