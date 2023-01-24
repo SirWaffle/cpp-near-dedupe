@@ -5,7 +5,7 @@ dedupes arrow datasets ( IPC .arrow db's at the moment) using minhash / jaccard 
 this project was thrown together in a few days and fueled by large amounts of coffee, so things are getting cleaned / fixed / improved, and there are likely bugs and other oddities in the code 
 
 # todo
-- LSH bands to reduce total number up comparisons
+- more configurable and more types of LSH hash algorithms
 - replace queues with arrays/vectors/ring buffers where possible ( CPU perf, less memory fragmentation )
 - better ways to track down thread communication slow downs and thread contention issues
 - better readme
@@ -45,6 +45,7 @@ sudo make release
 ```
 
 # running
+!!THIS IS OUT OF DATE!!
 - windows/linux
 
 ```
