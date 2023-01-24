@@ -247,7 +247,7 @@ private:
     uint64_t numEntries;
 
     uint64_t buckets;
-    //TODO: needs work to work with uint64_t
+
     std::vector < AbstractLSH<UINT_BAND_HASH_TYPE>* > LSHHasher;
 
 public:

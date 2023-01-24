@@ -102,7 +102,6 @@ public:
 
 private:
     //last entry is where we add stuff...
-    //TODO: change to forward_list
     std::list< Block<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* > fullBlocks;
     bool empty = true;
     uint64_t initialCapacity;

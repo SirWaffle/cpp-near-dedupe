@@ -228,7 +228,6 @@ namespace BruteForce
                     CompareItem< UINT_HASH_TYPE>* citem = new CompareItem< UINT_HASH_TYPE>(std::move(workItem));
                     do
                     {
-                        //TODO bad perf here but this is just for testing for now...
                         internalCompareThreadFutures.push_back(
                             threadPool->submit([this, workerThreadStopper, inclusiveStartInd, exclusiveEndInd, &earlyOut, &dupeThreash, citem]() {
                             

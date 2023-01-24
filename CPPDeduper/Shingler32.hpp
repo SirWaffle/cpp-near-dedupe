@@ -154,9 +154,6 @@ public:
                 for (int k = 0; k < K; k++) {
                     hashes[k] = hashes[k] ^ (c & 0xff);
                     hashes[k] = hashes[k] * 16777619;
-
-                    //TODO: usually with hashing this is fine, perhaps something is off though, def. verify
-                    // //UB optimization maybe? count is off in release mode
                     //warning C4333: '>>': right shift by too large amount, data loss
                     hashes[k] = hashes[k] ^ (c >> 16);
 

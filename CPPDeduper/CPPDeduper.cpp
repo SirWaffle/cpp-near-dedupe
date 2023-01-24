@@ -16,11 +16,6 @@
 #include "ThreadPool.h"
 #include "CLI11.hpp"
 
-/*
-* TODO:
-* - command line params (more, better, etc)
-* - fix all the really slow stuff in duperesolver, easy perf gains
-*/
 
 static constexpr int HASH_LENGTH_SHINGLES = 5; //words used per hash
 //static constexpr int NUM_HASHES = 256; //number of hashes for comparison
@@ -138,9 +133,9 @@ public:
         }
         else if (lshMethod == "rbs64")
         {
-            typename LSHBandHashMap<HASH_TYPE, uint32_t, NUM_HASHES>::LSH_TYPE_ENUM lshType;
-            lshType = LSHBandHashMap<HASH_TYPE, uint32_t, NUM_HASHES>::RANDOM_BIT;
-            uint32_t magicTemplate = 0;
+            typename LSHBandHashMap<HASH_TYPE, uint64_t, NUM_HASHES>::LSH_TYPE_ENUM lshType;
+            lshType = LSHBandHashMap<HASH_TYPE, uint64_t, NUM_HASHES>::RANDOM_BIT;
+            uint64_t magicTemplate = 0;
             comparerThread = makeComparerThread(comparerThreadFuture, lshType, magicTemplate);
         }
         else if(lshMethod == "hpb64")
