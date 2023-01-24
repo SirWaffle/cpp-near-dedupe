@@ -16,8 +16,8 @@ class AbstractLSH
 {
 public:
     virtual void reset() {};
-    virtual UINT_HASH_TYPE getHashVal(const uint64_t* domin) { return 0; };
-    virtual UINT_HASH_TYPE getHashVal(const uint32_t* domin) { return 0; };
+    virtual UINT_HASH_TYPE getHashVal(const uint64_t*) { return 0; };
+    virtual UINT_HASH_TYPE getHashVal(const uint32_t*) { return 0; };
 };
 
 
@@ -167,7 +167,6 @@ public:
 
     virtual void reset() final
     {
-        rndBits;
         rndArray.resize(param.NAlsoAppearsToBeVectorLength);
         std::mt19937 rng(unsigned(std::time(0)));
 
@@ -324,7 +323,8 @@ public:
         return bands;
     }
 
-    void Hash(UINT_HASH_TYPE* hash, uint32_t hashLen, std::vector<UINT_BAND_HASH_TYPE>::iterator bandHashes)
+    //todo:: hashLen
+    void Hash(UINT_HASH_TYPE* hash, uint32_t /*hashLen*/, std::vector<UINT_BAND_HASH_TYPE>::iterator bandHashes)
     {
         for (uint32_t b = 0, hi = 0; b < bands; b++, hi += bandSize, ++bandHashes)
             *bandHashes = hashBand(b, &hash[hi]);

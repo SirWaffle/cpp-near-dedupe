@@ -168,6 +168,8 @@ bool WorkThreadFunc(
 class IComparerThread
 {
 public:
+    virtual ~IComparerThread() {}
+
     virtual void IncreaseMaxWorkerThreads(int amt) = 0;
     virtual uint32_t GetWorkerThreadCount() = 0;
     virtual void WaitForFinish() = 0;
@@ -212,7 +214,7 @@ public:
     {
     }
 
-    ~ComparerThread()
+    ~ComparerThread() final
     {
     }
 
