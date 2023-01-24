@@ -16,6 +16,8 @@
 #include <chrono>
 #include <iostream>
 
+#define LOAD_TEST false
+
 using namespace std::chrono_literals;
 
 //data 
@@ -157,21 +159,34 @@ protected:
 
                             std::string_view view = stringArray.GetView(i);
 
-                            //convert and send
-                            U16String* u16str = new U16String();
-                            u16str->reserve(view.size());
-                            CharPtrToUStr(view.data(), view.size(), *u16str);
-
-                            ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData(fileIndex, lineNumOffset, i, std::move(u16str));
-#ifdef _DEBUG
-                            data->sourceFilePath = path_to_file;
+#if LOAD_TEST
+                            for (int testLoad = 0; testLoad < 10000; ++testLoad)
 #endif
-                            outWorkQueue.push(std::move(data));
-
-                            if (outWorkQueue.size() >= pushWorkQueueToOutputSize)
                             {
-                                //lock and push to outputQueue
-                                batchQueue.push_queue(&outWorkQueue);
+                                //convert and send
+                                U16String* u16str = new U16String();
+                                u16str->reserve(view.size());
+                                CharPtrToUStr(view.data(), view.size(), *u16str);
+
+#if LOAD_TEST
+                                //need to change line offset or the checker thread will ignore it
+                                static uint32_t inc = 0;
+                                ++inc;
+                                ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData(inc, lineNumOffset + 1, i, std::move(u16str));
+#else
+                                ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData(fileIndex, lineNumOffset, i, std::move(u16str));
+#endif
+
+#ifdef _DEBUG
+                                data->sourceFilePath = path_to_file;
+#endif
+                                outWorkQueue.push(std::move(data));
+
+                                if (outWorkQueue.size() >= pushWorkQueueToOutputSize)
+                                {
+                                    //lock and push to outputQueue
+                                    batchQueue.push_queue(&outWorkQueue);
+                                }
                             }
                         }
                     }

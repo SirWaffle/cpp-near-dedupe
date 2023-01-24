@@ -16,7 +16,6 @@
 
 typedef std::basic_string<uint16_t> U16String;
 
-#pragma message("need to validate hashtable64 bit")
 class HashTable64 {
 public:
     HashTable64(int minCapacity) :
@@ -118,7 +117,6 @@ private:
 };
 
 
-#pragma message("need to validate shingler64 bit")
 template<int K, int N>
 class Pipe3Shingler64 {
 public:

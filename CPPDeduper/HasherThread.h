@@ -38,7 +38,7 @@ protected:
     std::stop_source m_stop;
     uint32_t readChunkSize;
     LockableQueue< HasherThreadOutputData<UINT_HASH_TYPE>* >* hashedDataQueue;
-    const uint32_t workOutQueueSize = 1024;
+    const uint32_t workOutQueueSize = 1024;    
 
 public:
     HasherThread(LockableQueue< HasherThreadOutputData<UINT_HASH_TYPE>* >* hashedDataQueue, uint32_t _readChunkSize)

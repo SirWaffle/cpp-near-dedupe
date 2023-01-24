@@ -36,20 +36,23 @@ protected:
     std::string baseOutPath;
 
     //some stats
-    uint32_t pendingDuplicates = 0;
-    uint32_t totalDuplicates = 0;
-    uint32_t totalDuplicatesSkipped = 0;
+    uint64_t pendingDuplicates = 0;
+    uint64_t totalDuplicates = 0;
+    uint64_t totalDuplicatesSkipped = 0;
 
     uint32_t workChunkSize;
 
     bool m_validateOutput;
 
+    bool noFileOut;
+
 public:
-    DupeResolverThread(std::filesystem::path _baseInPath, std::string _baseOutPath, uint32_t _workChunkSize, bool _validateOutput)
+    DupeResolverThread(std::filesystem::path _baseInPath, std::string _baseOutPath, uint32_t _workChunkSize, bool _validateOutput, bool _noFileOut)
         :baseInPath(_baseInPath),
         baseOutPath(_baseOutPath),
         workChunkSize(_workChunkSize),
-        m_validateOutput(_validateOutput)
+        m_validateOutput(_validateOutput),
+        noFileOut(_noFileOut)
     {
     }
 
@@ -67,19 +70,24 @@ public:
         m_stop.request_stop();
     }
 
-    uint32_t TotalDupes()
+    uint64_t TotalDupes()
     {
         return totalDuplicates;
     }
 
-    uint32_t TotalDupesRemoved()
+    uint64_t TotalDupesRemoved()
     {
         return totalDuplicatesSkipped;
     }
 
-    uint32_t PendingDuplicates()
+    uint64_t PendingDuplicates()
     {
         return pendingDuplicates;
+    }
+
+    uint64_t GetEstimatedDupeMemeroyUsageMB()
+    {
+        return (pendingDuplicates * sizeof(int64_t)) / (1024UL * 1024UL);
     }
 
     void EnterProcFunc(LockableQueue< CompareThreadDupeItem* >* duplicates, 
@@ -120,6 +128,9 @@ public:
                 }
             }
         }
+
+        if (noFileOut) //used when testing, dont write files
+            return; 
 
         //we can be super safe and handle removing the dupes after we have finished processing them all...
         //not as fast, but safe. do this for now, then improve it later
