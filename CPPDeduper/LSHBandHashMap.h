@@ -22,6 +22,7 @@ public:
 
 
 //only works with uint64_t for now
+//this one is total garbage, only usefull for benchmarkign agsint at 256 bands
 template<typename UINT_HASH_TYPE>
 class FullCheckerLSH: public AbstractLSH< UINT_HASH_TYPE>
 {

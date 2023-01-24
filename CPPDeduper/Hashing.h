@@ -34,7 +34,7 @@ int MakeFingerprint(const U16String& str, std::unique_ptr<uint32_t[]>* hashes)
     return len;
 }
 
-//faster if we use const values for hshing
+//faster if we use const values for hashing
 template<int HASH_LEN_SHINGLES, int NUM_HASHES>
 int MakeFingerprint(const U16String& str, std::unique_ptr<uint64_t[]>* hashes)
 {

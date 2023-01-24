@@ -165,8 +165,23 @@ bool WorkThreadFunc(
 }
 
 
+class IComparerThread
+{
+public:
+    virtual void IncreaseMaxWorkerThreads(int amt) = 0;
+    virtual uint32_t GetWorkerThreadCount() = 0;
+    virtual void WaitForFinish() = 0;
+    virtual size_t GetUniqueItemsCount() = 0;
+    virtual uint64_t GetNumLSHEntries() = 0;
+    virtual uint64_t GetEstimatedLSHMemoryUsageMB() = 0;
+    virtual uint64_t GetMemUsageMB() = 0;
+    virtual LockableQueue< CompareThreadDupeItem* >* GetOutputQueuePtr() = 0;
+    virtual size_t GetRemainingWork() = 0;
+    virtual uint64_t GetComparedItems() = 0;
+};
+
 template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE, typename UINT_BAND_HASH_TYPE >
-class ComparerThread
+class ComparerThread: public IComparerThread
 {
 protected:
     bool m_throwOutDupes;
@@ -201,52 +216,52 @@ public:
     {
     }
 
-    void IncreaseMaxWorkerThreads(int amt)
+    void IncreaseMaxWorkerThreads(int amt) final
     {
         maxThreadWorkers.fetch_add(amt);
     }
 
-    uint32_t GetWorkerThreadCount()
+    uint32_t GetWorkerThreadCount() final
     {
         return maxThreadWorkers.load();
     }
 
-    void WaitForFinish()
+    void WaitForFinish() final
     {
         m_stop.request_stop();
     }
 
-    size_t GetUniqueItemsCount()
+    size_t GetUniqueItemsCount() final
     {
         return hashblocks.NumEntries();
     }
 
-    uint64_t GetNumLSHEntries()
+    uint64_t GetNumLSHEntries() final
     {
         return bandHashMap.GetNumEntries();
     }
 
-    uint64_t GetEstimatedLSHMemoryUsageMB()
+    uint64_t GetEstimatedLSHMemoryUsageMB() final
     {
         return bandHashMap.GetEstimatedMemoryUsageBytes() / (1024ULL * 1024ULL);
     }
 
-    uint64_t GetMemUsageMB()
+    uint64_t GetMemUsageMB() final
     {
         return hashblocks.MemoryUsage() / (1024ULL * 1024ULL);
     }
 
-    LockableQueue< CompareThreadDupeItem* >* GetOutputQueuePtr()
+    LockableQueue< CompareThreadDupeItem* >* GetOutputQueuePtr() final
     {
         return &duplicateItems;
     }
 
-    size_t GetRemainingWork()
+    size_t GetRemainingWork() final
     {
         return workQueue.size();
     }
 
-    uint64_t GetComparedItems()
+    uint64_t GetComparedItems() final
     {
         return comparedItems;
     }
@@ -374,7 +389,7 @@ public:
                     if (add == true)
                     {
                         add = false;
-                        for (int i = 0; i < 2000000; ++i)
+                        for (int i = 0; i < 5000000; ++i)
                         {
                             auto entry = hashblocks.AddItem(citem->myHashData->hashes.get(), citem->myHashData->hashLen);
                             bandHashMap.AddToMap(bandHashes.begin(), entry);

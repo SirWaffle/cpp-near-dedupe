@@ -36,7 +36,8 @@ public:
     {}
 
     int Run(std::string inputPath, std::string outPath, std::string dataColumnName, std::string extension,
-        double matchThresh, int numHasherThreads, int maxRecordsLoaded, int hashSize, bool noFileOut, uint32_t numBands, uint64_t numBuckets)
+        double matchThresh, int numHasherThreads, int maxRecordsLoaded, int hashSize, bool noFileOut, 
+        uint32_t numBands, uint64_t numBuckets, std::string lshMethod)
     {
         std::filesystem::path basePath = inputPath;
 
@@ -107,25 +108,54 @@ public:
             hasherThreadFutures.push_back(threadPool.submit(&HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>::EnterProcFunc, hasherThread, arrowLoaderThread->GetOutputQueuePtr()));
         }
 
+
+
         //comparer
-#define LSH_KEY_TYPE uint64_t
-        typename LSHBandHashMap<HASH_TYPE, LSH_KEY_TYPE, NUM_HASHES>::LSH_TYPE_ENUM lshType;
-        lshType = LSHBandHashMap<HASH_TYPE, LSH_KEY_TYPE, NUM_HASHES>::RANDOM_BIT;
-        //numBuckets = UINT32_MAX;
+        //template magic stuff until i figure out a better way
 
-#if false //for the crap hasher, comparison for stuff
-        typename LSHBandHashMap<HASH_TYPE, LSH_KEY_TYPE, NUM_HASHES>::LSH_TYPE_ENUM lshType;
-        lshType = LSHBandHashMap<HASH_TYPE, LSH_KEY_TYPE, NUM_HASHES>::ONLY_HASH_MAP;
-        numBuckets = UINT64_MAX;
-#endif
+        auto makeComparerThread = [&]<typename LSH_KEY_TYPE>(std::future<void>& comparerThreadFuture, auto lshType, LSH_KEY_TYPE&) {
+            // do something
+            ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE, LSH_KEY_TYPE>* comparerThread =
+                new ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE, LSH_KEY_TYPE>(true, 2048, &threadPool, expectedDocs, numBands, numBuckets, lshType, std::max(1U, numThreads - baseThreads));
 
-        ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE, LSH_KEY_TYPE>* comparerThread =
-            new ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE, LSH_KEY_TYPE>(true, 2048, &threadPool, expectedDocs, numBands, numBuckets, lshType, std::max(1U, numThreads - baseThreads));
+            //for binary 'dupe or not', we dont need to score, so use the threshval for early out as well
+            //hashers have a static queue, one shared across them all
+            comparerThreadFuture = threadPool.submit(&ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE, LSH_KEY_TYPE>::EnterProcFunc,
+                comparerThread, &hashedDataQueue, /*JACCARD_EARLY_OUT*/ matchThresh, matchThresh);
 
-        //for binary 'dupe or not', we dont need to score, so use the threshval for early out as well
-        //hashers have a static queue, one shared across them all
-        std::future<void> comparerThreadFuture = threadPool.submit(&ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE, LSH_KEY_TYPE>::EnterProcFunc,
-            comparerThread, &hashedDataQueue, /*JACCARD_EARLY_OUT*/ matchThresh, matchThresh);
+            return comparerThread;
+        };
+
+        std::future<void> comparerThreadFuture;
+        IComparerThread* comparerThread = nullptr;
+
+        if (lshMethod == "rbs32")
+        {
+            typename LSHBandHashMap<HASH_TYPE, uint32_t, NUM_HASHES>::LSH_TYPE_ENUM lshType;
+            lshType = LSHBandHashMap<HASH_TYPE, uint32_t, NUM_HASHES>::RANDOM_BIT;
+            uint32_t magicTemplate = 0;
+            comparerThread = makeComparerThread(comparerThreadFuture, lshType, magicTemplate);
+        }
+        else if (lshMethod == "rbs64")
+        {
+            typename LSHBandHashMap<HASH_TYPE, uint32_t, NUM_HASHES>::LSH_TYPE_ENUM lshType;
+            lshType = LSHBandHashMap<HASH_TYPE, uint32_t, NUM_HASHES>::RANDOM_BIT;
+            uint32_t magicTemplate = 0;
+            comparerThread = makeComparerThread(comparerThreadFuture, lshType, magicTemplate);
+        }
+        else if(lshMethod == "hpb64")
+        {
+            typename LSHBandHashMap<HASH_TYPE, uint64_t, NUM_HASHES>::LSH_TYPE_ENUM lshType;
+            lshType = LSHBandHashMap<HASH_TYPE, uint64_t, NUM_HASHES>::ONLY_HASH_MAP;
+            uint64_t magicTemplate = 0;
+            comparerThread = makeComparerThread(comparerThreadFuture, lshType, magicTemplate);
+        }
+        else
+        {
+            std::string str = "invalid lsh method";
+            std::cout << str << std::endl;
+            throw std::runtime_error(str);
+        }
 
         //and as the comparer spits out the dupes, we can start removing them from the datasets...
         DupeResolverThread* dupeResolverThread = new DupeResolverThread(basePath, outPath, 4096, false, noFileOut);
@@ -261,7 +291,7 @@ public:
 { \
     Runner<type, size, numhashes> runner;\
     return runner.Run(inputPath, outPath, dataColumnName, extension,\
-        matchThresh, numHasherThreads, maxRecordsLoaded, hashSize, noFileOut, numBands, numBuckets);\
+        matchThresh, numHasherThreads, maxRecordsLoaded, hashSize, noFileOut, numBands, numBuckets, lshMethod);\
 }
 
 #define DO_RUN_AND_RETURN_IF_WITH_NUM_HASHES(hashSize,hashBlockSize,numhashes)  {\
@@ -312,29 +342,35 @@ int main(int argc, const char** argv)
     opt = app.add_option("-j,--jaccardSim", matchThresh, "min jaccard similarity value ( 0.0 to 1.0 )");
 
     //thread counts
-    int numHasherThreads = 7; // 4; //more threads crunch through mroe input faster
+    int numHasherThreads = 10; // 4; //more threads crunch through mroe input faster
     opt = app.add_option("-t,--hashThreads", numHasherThreads, "threads dedicated to hashing");
 
     int maxRecordsLoaded = 4096 * 48; //the higher this is, the higher memory usage can get
     opt = app.add_option("-r,--maxRecords", maxRecordsLoaded, "max arrow rows to load at once");
 
-    int hashSize = 64; //hash key size
-    opt = app.add_option("-s,--hashSize", hashSize, "hash size in bits, valid values ( 32 or 64 )");
+    int hashSize = 64; //hash key size for minhash
+    opt = app.add_option("-s,--minhashKeySize", hashSize, "hash size in bits, valid values ( 32 or 64 )");
 
     int hashBlockSize = 524288; //size of contiguous memory blocks of hashes
     opt = app.add_option("-b,--hashBlockSize", hashBlockSize, "size of memory blocks of unique hashes, valid values ( 256, 512, 1024, 524288 )");
 
-    int numHashes = 256; //size of contiguous memory blocks of hashes used in compare thread, best if its cacheable on the cpu
-    opt = app.add_option("-n,--numFingerprintHashes", numHashes, "number of hashes per minhash fingerprint ( 64, 128, 256 )");
+    int numHashes = 256; 
+    opt = app.add_option("-n,--numMinhashKeys", numHashes, "number of hashes per minhash fingerprint ( 64, 128, 256 )");
 
     bool noFileOut = true;
     opt = app.add_option("-q,--noFileOut", noFileOut, "dont write out deduped files, useful for testing");
 
-    uint32_t numBands = 32;
-    opt = app.add_option("-l,--bands", numBands, "LSH bands ( numHash (default 256) must be divisible by numBands evenly )");
+    uint32_t numBands = 64;
+    opt = app.add_option("-l,--bands", numBands, "LSH bands ( numMinhashKeys (default 256) must be divisible by numBands evenly )");
 
     uint64_t numBuckets = UINT32_MAX;
     opt = app.add_option("-m,--buckets", numBands, "LSH buckets - number of buckets used inside LSH. larger = more memory)");
+
+    std::string lshMethod = "rbs32";
+    opt = app.add_option("--lsh", lshMethod, "rbs32 / rbs64: random bit sampling with 32 or 64 bit key, hpb64: hash map entry per bucket with 64 bit key");
+
+    for (char& c : lshMethod)
+        c = ::tolower(c);
 
     try {
         app.parse(argc, argv);
