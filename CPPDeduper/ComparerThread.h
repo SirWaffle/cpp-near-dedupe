@@ -53,8 +53,7 @@ struct CompareItem
 };
 
 
-//with lists
-
+//flat container
 template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
 bool WorkThreadFunc(
     std::stop_source workerThreadStopper,
@@ -121,7 +120,7 @@ bool WorkThreadFunc(
     return false;
 }
 
-
+//container of containers
 template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
 bool WorkerThreadFunc2(std::stop_source workerThreadStopper,
     auto startIt,
@@ -139,6 +138,53 @@ bool WorkerThreadFunc2(std::stop_source workerThreadStopper,
 
     return matched;
 }
+
+
+
+//split this out to try different methods
+template<typename LSHMap>
+class CompareStrat
+{
+    LSHMap* lshMap;
+
+    std::list< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* > potentialmatchCandidates;
+    //std::vector< typename LSHHashMap::BucketHashPointerList* > potentialmatchCandidates;
+    //potentialmatchCandidates.reserve(MAX_HASH_LEN);
+
+    //get a list of potential candidates
+    void CheckAgainstHashes(citem)
+    {
+        //potentialmatchCandidates.resize(0);
+        potentialmatchCandidates.clear();
+
+
+        CompareItem< UINT_HASH_TYPE>* citem = new CompareItem< UINT_HASH_TYPE>(std::move(workItem));
+
+        bandHashMap.Hash(citem->myHashData->hashes.get(), citem->myHashData->hashLen, bandHashes.begin());
+        // size_t totalPotentialCandidates = bandHashMap.GetCollided(bandHashes.begin(), potentialmatchCandidates);
+
+
+        size_t totalPotentialCandidates = bandHashMap.GetCollidedSet(bandHashes.begin(), potentialmatchCandidates);
+    }
+
+    //potential candidate count
+    bool HasPotentialMatches()
+    {
+        return potentialmatchCandidates.size() < bandHashMap.GetBands() / 4;
+    }
+
+    //iterator for worker thread start
+    bool CheckFormatches()
+    {
+        //do iteration, wait on futures, etc.
+    }
+
+    //add to lsh
+    void AddToLSH()
+    {
+    }
+
+};
 
 
 
