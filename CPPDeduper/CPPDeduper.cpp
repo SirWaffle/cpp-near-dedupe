@@ -144,6 +144,7 @@ public:
             lshType = LSHBandHashMap<HASH_TYPE, uint64_t, NUM_HASHES>::ONLY_HASH_MAP;
             uint64_t magicTemplate = 0;
             comparerThread = makeComparerThread(comparerThreadFuture, lshType, magicTemplate);
+            numBuckets = UINT64_MAX;
         }
         else
         {
@@ -359,7 +360,7 @@ int main(int argc, const char** argv)
     opt = app.add_option("-l,--bands", numBands, "LSH bands ( numMinhashKeys (default 256) must be divisible by numBands evenly )");
 
     uint64_t numBuckets = UINT32_MAX;
-    opt = app.add_option("-m,--buckets", numBands, "LSH buckets - number of buckets used inside LSH. larger = more memory)");
+    opt = app.add_option("-m,--buckets", numBuckets, "LSH buckets - number of buckets used inside LSH. larger = more memory)");
 
     std::string lshMethod = "rbs32";
     opt = app.add_option("--lsh", lshMethod, "rbs32 / rbs64: random bit sampling with 32 or 64 bit key, hpb64: hash map entry per bucket with 64 bit key");

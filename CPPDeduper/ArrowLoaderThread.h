@@ -16,7 +16,12 @@
 #include <chrono>
 #include <iostream>
 
-#define LOAD_TEST false
+#define LOAD_TEST true
+
+#if LOAD_TEST
+#include <random>
+#include <algorithm>
+#endif
 
 using namespace std::chrono_literals;
 
@@ -169,9 +174,15 @@ protected:
                                 CharPtrToUStr(view.data(), view.size(), *u16str);
 
 #if LOAD_TEST
+
                                 //need to change line offset or the checker thread will ignore it
                                 static uint32_t inc = 0;
                                 ++inc;
+
+                                //shuffle it good so we dont get duplicate docs...that just causes worst case scenario with hashing 
+                                std::random_device rd;
+                                std::mt19937 g(rd());
+                                std::shuffle(u16str->begin(), u16str->end(), g);
                                 ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData(inc, lineNumOffset + 1, i, std::move(u16str));
 #else
                                 ArrowLoaderThreadOutputData* data = new ArrowLoaderThreadOutputData(fileIndex, lineNumOffset, i, std::move(u16str));

@@ -15,6 +15,7 @@
 #include <nmmintrin.h>
 #include <emmintrin.h>
 
+#include "ChunkList.h"
 
 #define LOAD_TEST false
 
@@ -22,7 +23,7 @@
 #define USE_INTRIN true
 
 //max items to compare across this thread ( to prevent slowdowns from locking for small numbers of items )
-const int singleThreadSize = 4096;
+const int singleThreadSize = 256;
 
 struct CompareThreadDupeItem
 {
@@ -52,11 +53,14 @@ struct CompareItem
 };
 
 
-/*
+//with lists
+
 template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
 bool WorkThreadFunc(
     std::stop_source workerThreadStopper,
-    std::vector< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* >* hashesVec,
+    auto startIt,
+    auto endIt,
+    uint32_t iterIncrementAmount,
     double earlyOut, double dupeThreash, CompareItem<UINT_HASH_TYPE>* citem)
 {
     //compare incoming against all others, update the its max value.
@@ -64,66 +68,10 @@ bool WorkThreadFunc(
 #if USE_INTRIN
     __m128i itemflags = _mm_set_epi64x(citem->myHashData->arrowData->docId, citem->myHashData->arrowData->rowNumber);
 #endif
-
-    for (size_t ind = 0; ind < hashesVec->size() && !workerThreadStopper.stop_requested(); ++ind)
+    auto dbgIt = startIt;
+    for (; startIt != endIt && !workerThreadStopper.stop_requested();)
     {
-        auto& hashes = *(*hashesVec)[ind];
-#if ALREADY_PROCESSED_CHECK
-#if USE_INTRIN 
-        __m128i flags = _mm_loadu_si128((__m128i*) (&hashes.flags[0]));
-        __m128i cmp = _mm_cmpeq_epi64(itemflags, flags);
-
-        if (_mm_extract_epi64(cmp, 0) != 0 && _mm_extract_epi64(cmp, 1) != 0)
-        {
-            continue;
-        }
-        else
-        {
-            _mm_storeu_si128((__m128i*) (&hashes.flags[0]), itemflags);
-        }
-#else
-        if (hashes.flags[0] == citem->myHashData->arrowData->docId
-            && hashes.flags[1] == citem->myHashData->arrowData->rowNumber)
-        {
-            continue;
-        }
-
-        hashes.flags[0] = citem->myHashData->arrowData->docId;
-        hashes.flags[1] = citem->myHashData->arrowData->rowNumber;
-#endif
-#endif
-
-       double match = JaccardTurbo2(citem->myHashData->hashes.get(), (int)citem->myHashData->hashLen,
-                &hashes.hashes[0], (int)hashes.hashLen, earlyOut);
-
-        if (match >= dupeThreash)
-        {
-            //we are done
-            workerThreadStopper.request_stop();
-            return true;
-        }
-    }
-
-    return false;
-}
-*/
-
-
-template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
-bool WorkThreadFunc(
-    std::stop_source workerThreadStopper,
-    typename std::vector< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* >::iterator hashesVec, size_t numhashes,
-    double earlyOut, double dupeThreash, CompareItem<UINT_HASH_TYPE>* citem)
-{
-    //compare incoming against all others, update the its max value.
-    //this will prioritize removing later documents that match, not the first one
-#if USE_INTRIN
-    __m128i itemflags = _mm_set_epi64x(citem->myHashData->arrowData->docId, citem->myHashData->arrowData->rowNumber);
-#endif
-
-    for (size_t ind = 0; ind < numhashes && !workerThreadStopper.stop_requested(); ++ind, ++hashesVec)
-    {
-        auto hashes = *hashesVec;
+        auto hashes = *startIt;
 
 #if USE_INTRIN 
         //used to not check the same document for the same item across threads, since docs can be in multiple buckets
@@ -132,6 +80,10 @@ bool WorkThreadFunc(
 
         if (_mm_extract_epi64(cmp, 0) != 0 && _mm_extract_epi64(cmp, 1) != 0)
         {
+            //increment the start iterator by provided amount
+            for (uint32_t i = 0; i < iterIncrementAmount && startIt != endIt; ++i, ++startIt)
+            {
+            }
             continue;
         }
         else
@@ -153,16 +105,42 @@ bool WorkThreadFunc(
         double match = JaccardTurbo2(citem->myHashData->hashes.get(), (int)citem->myHashData->hashLen,
             &hashes->hashes[0], (int)hashes->hashLen, earlyOut);
 
-        if (match >= dupeThreash)
+        if (match > dupeThreash)
         {
             //we are done
             workerThreadStopper.request_stop();
             return true;
         }
+
+        //increment the start iterator by provided amount
+        for (uint32_t i = 0; i < iterIncrementAmount && startIt != endIt; ++i, ++startIt)
+        {
+        }
     }
 
     return false;
 }
+
+
+template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE>
+bool WorkerThreadFunc2(std::stop_source workerThreadStopper,
+    auto startIt,
+    auto endIt,
+    double earlyOut, double dupeThreash, CompareItem<UINT_HASH_TYPE>* citem)
+{
+    bool matched = false;
+    for (; startIt != endIt && matched == false && !workerThreadStopper.stop_requested(); ++startIt)
+    {
+        auto listStartIt = (*startIt)->begin();
+        auto listEndIt = (*startIt)->end();
+        matched = WorkThreadFunc<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(
+            workerThreadStopper, listStartIt, listEndIt, 1, earlyOut, dupeThreash, citem);
+    }
+
+    return matched;
+}
+
+
 
 
 class IComparerThread
@@ -276,8 +254,9 @@ public:
         std::vector<UINT_BAND_HASH_TYPE> bandHashes;
         bandHashes.resize(bandHashMap.GetBands());
 
-        std::vector< std::vector< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* >* > potentialmatchCandidates;
-        potentialmatchCandidates.reserve(MAX_HASH_LEN);
+        std::list< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* > potentialmatchCandidates;
+        //std::vector< typename LSHHashMap::BucketHashPointerList* > potentialmatchCandidates;
+        //potentialmatchCandidates.reserve(MAX_HASH_LEN);
 
         while (!m_stop.stop_requested() || hashedDataQueue->Length() > 0)
         {
@@ -294,16 +273,24 @@ public:
                 workItem = workQueue.front();
                 workQueue.pop();
 
-                potentialmatchCandidates.resize(0);
+                //potentialmatchCandidates.resize(0);
+                potentialmatchCandidates.clear();
 
 
                 CompareItem< UINT_HASH_TYPE>* citem = new CompareItem< UINT_HASH_TYPE>(std::move(workItem));
                 
                 bandHashMap.Hash(citem->myHashData->hashes.get(), citem->myHashData->hashLen, bandHashes.begin());
-                size_t totalPotentialCandidates = bandHashMap.GetCollided(bandHashes.begin(), potentialmatchCandidates);
+               // size_t totalPotentialCandidates = bandHashMap.GetCollided(bandHashes.begin(), potentialmatchCandidates);
 
+                
+                size_t totalPotentialCandidates = bandHashMap.GetCollidedSet(bandHashes.begin(), potentialmatchCandidates);
                 //early out since no checks
-                if (hashblocks.IsEmpty() || potentialmatchCandidates.size() == 0) [[unlikely]]
+                //TODO: tune this...
+                //TODO: this is fast when there are 256 buckets, because we *will* hit exact matches
+                //if (hashblocks.IsEmpty() || potentialmatchCandidates.size() < 200) [[unlikely]]
+                
+                if (hashblocks.IsEmpty() || potentialmatchCandidates.size() < bandHashMap.GetBands() / 4) [[unlikely]]
+                
                 {
                     auto entry = hashblocks.AddItem(citem->myHashData->hashes.get(), citem->myHashData->hashLen);
 
@@ -324,38 +311,34 @@ public:
                 bool matched = false;
                 if (totalPotentialCandidates < singleThreadSize) //faster not to wait on threads and locks and all that
                 {
-                    for (size_t pc = 0; pc < potentialmatchCandidates.size() && matched == false && !workerThreadStopper.stop_requested(); ++pc)
-                    {
-                        auto list = potentialmatchCandidates[pc];
-                        auto ptr = list->begin();
-                        size_t len = list->size();
+                    matched = WorkThreadFunc<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(
+                        workerThreadStopper, potentialmatchCandidates.begin(), potentialmatchCandidates.end(), 1, earlyOut, dupeThreash, citem);
 
-                        matched = WorkThreadFunc<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(
-                            workerThreadStopper, ptr, len, earlyOut, dupeThreash, citem);
-                    }
+                    //matched = WorkerThreadFunc2<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(
+                    //    workerThreadStopper, potentialmatchCandidates.begin(), potentialmatchCandidates.end(), earlyOut, dupeThreash, citem);
                 }
                 else
                 {
-                    for (size_t pc = 0; pc < potentialmatchCandidates.size() && !workerThreadStopper.stop_requested(); ++pc)
+                    //split the list by offseting start iterators, and incrementing them by different amounts
+                    //for (auto pcIt = potentialmatchCandidates.begin(); pcIt != potentialmatchCandidates.end() && !workerThreadStopper.stop_requested(); ++pcIt)
                     {
-                        auto list = potentialmatchCandidates[pc];
+                        //auto list = *pcIt;
+                        auto list = &potentialmatchCandidates;
 
                         //should chunkify these vectors as well, since some can be much longer than others
-                        size_t sliceLen = singleThreadSize * 2;
-                        for (size_t slice = 0; slice < list->size() && !workerThreadStopper.stop_requested(); slice += sliceLen)
+                        uint32_t numSlices = (uint32_t)list->size() / singleThreadSize;
+                        if (numSlices == 0)
+                            numSlices = 1;
+                        auto sliceIt = list->begin();
+                        auto endIt = list->end();
+
+                        for (size_t slice = 0; slice < numSlices && sliceIt != list->end() && !workerThreadStopper.stop_requested(); slice++, sliceIt++)
                         {
-                            size_t len = sliceLen;
-                            if (slice + len >= list->size())
-                                len = list->size() - slice;
-
-                            //only good for vectors, will need to change with lists
-                            auto ptr = list->begin() + slice;
-
                             internalCompareThreadFutures.push_back(
-                                threadPool->submit([this, workerThreadStopper, ptr, len, &earlyOut, &dupeThreash, citem]() {
+                                threadPool->submit([this, workerThreadStopper, sliceIt, endIt, numSlices , &earlyOut, &dupeThreash, citem]() {
 
                                     return WorkThreadFunc<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>(
-                                        workerThreadStopper, ptr, len, earlyOut, dupeThreash, citem);
+                                        workerThreadStopper, sliceIt, endIt, numSlices, earlyOut, dupeThreash, citem);
                                     }
                                 )
                             );

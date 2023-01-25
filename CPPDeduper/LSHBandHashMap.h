@@ -55,27 +55,27 @@ public:
             //to hash similar things into collisions
 #           //*AND* the memory usgae for these buckets will be nuts unless they actually
             //hash down to a smaller value ( like 32bit value, or less )
-            if (param.bandSize <= param.MAX_HASH_LEN / 32)
+            if (param.bandSize >= 32)
             {
                 bandHash |= (hash[i] % param.buckets);
             }
-            else if (param.bandSize <= param.MAX_HASH_LEN / 16)
+            else if (param.bandSize == 16)
             {  
                 bandHash |= ((uint64_t)hash[i] % 0x3) << (i * 2);
             }
-            else if (param.bandSize <= param.MAX_HASH_LEN / 8)
+            else if (param.bandSize == 8)
             {
                 bandHash |= ((uint64_t)hash[i] % 0xF) << (i * 4);
             }
-            else if (param.bandSize <= param.MAX_HASH_LEN / 4)
+            else if (param.bandSize == 4)
             {
                 bandHash |= ((uint64_t)hash[i] % 0xFF) << (i * 8);
             }
-            else if (param.bandSize <= param.MAX_HASH_LEN / 2)
+            else if (param.bandSize == 2)
             {
                 bandHash |= ((uint64_t)hash[i] % 0xFFFF) << (i * 16);
             }
-            else if (param.bandSize <= param.MAX_HASH_LEN)//full value copy - max buckets
+            else if (param.bandSize == 1)//full value copy - max buckets
             {
                 bandHash = hash[i];
             }
@@ -99,30 +99,30 @@ public:
             //to hash similar things into collisions
 #           //*AND* the memory usgae for these buckets will be nuts unless they actually
             //hash down to a smaller value ( like 32bit value, or less )
-            if (param.bandSize <= param.MAX_HASH_LEN / 32)
+            if (param.bandSize >= 32)
             {
                 bandHash |= (hash[i] % 0x3) << (i);
             }
-            else if (param.bandSize <= param.MAX_HASH_LEN / 16)
+            else if (param.bandSize == 16)
             {
                 //what happens if we just modulo, and let things sort themselves out     
                 bandHash |= (hash[i] % 0xF) << (i * 4);
                 //bandHash |= (UINT_BAND_HASH_TYPE)(hash[i] & (0xAA << i));//0xFF
                 //bandHash ^= (UINT_BAND_HASH_TYPE)(hash[i] ^ (0x55 << i));
             }
-            else if (param.bandSize <= param.MAX_HASH_LEN / 8)
+            else if (param.bandSize == 8)
             {
                 bandHash |= (hash[i] % 0xFF) << (i * 8);
             }
-            else if (param.bandSize <= param.MAX_HASH_LEN / 4)
+            else if (param.bandSize == 4)
             {
                 bandHash |= (hash[i] % 0xFFFF) << (i * 16);
             }
-            else if (param.bandSize <= param.MAX_HASH_LEN / 2)
+            else if (param.bandSize == 2)
             {
                 bandHash |= (hash[i] % 0xFFFFFFFF) << (i * 32);
             }
-            else if (param.bandSize <= param.MAX_HASH_LEN)//full value copy - max buckets
+            else if (param.bandSize ==1)//full value copy - max buckets
             {
                 bandHash = hash[i];
             }
@@ -140,10 +140,13 @@ private:
 
 
 //only works with uint32_t for now / uint16_t
+
+#define RBS_TYPE uint16_t
+
 template<typename UINT_HASH_TYPE>
 class rbsLsh : public AbstractLSH< UINT_HASH_TYPE>
 {
-    typedef uint16_t BIT_CHECK_SIZE;
+    typedef RBS_TYPE BIT_CHECK_SIZE;
     //uniform dist must be equal to or greater than bit check size
     typedef uint16_t UNIFORM_DISTRIBUTION_SIZE;
 
@@ -231,7 +234,8 @@ template<typename UINT_HASH_TYPE, typename UINT_BAND_HASH_TYPE, uint32_t MAX_HAS
 class LSHBandHashMap
 {
 public:
-    typedef std::vector< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* > BucketHashPointerList;
+    //TODO: forward_list, but have to store size somewhere
+    typedef std::deque< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* > BucketHashPointerList;
     typedef std::unordered_map< UINT_BAND_HASH_TYPE, BucketHashPointerList > HashMap;
 
     enum LSH_TYPE_ENUM
@@ -278,8 +282,8 @@ public:
                 //uniform distribution wont take uint64, so lets cast to uint32...
                 typename rbsLsh<UINT_BAND_HASH_TYPE>::Parameter p;
                 p.NumberOfBuckets = buckets;
-                p.VectorLength = bandSize * sizeof(UINT_HASH_TYPE) / sizeof(uint16_t); // MAX_HASH_LEN; //not sure
-                p.NAlsoAppearsToBeVectorLength = bandSize * sizeof(UINT_HASH_TYPE) / sizeof(uint16_t); // sizeof(UINT_HASH_TYPE)* bandSize; //not sure
+                p.VectorLength = bandSize * sizeof(UINT_HASH_TYPE) / sizeof(RBS_TYPE); // MAX_HASH_LEN; //not sure
+                p.NAlsoAppearsToBeVectorLength = bandSize * sizeof(UINT_HASH_TYPE) / sizeof(RBS_TYPE); // sizeof(UINT_HASH_TYPE)* bandSize; //not sure
                 p.C = UINT16_MAX; //not sure 
 
                 auto rbs = new rbsLsh<UINT_BAND_HASH_TYPE>();
@@ -347,7 +351,7 @@ public:
         if (it == hashMaps[bucketNum].end())
         {
             auto list = BucketHashPointerList();
-            list.reserve(4096);
+            //list.reserve(4096 * 16);
             list.push_back(hashEntry);
             hashMaps[bucketNum].insert({ bandHash, list });
         }
@@ -357,7 +361,7 @@ public:
         }
     }
 
-    size_t GetCollided(std::vector<UINT_BAND_HASH_TYPE>::iterator bandHashes, std::vector< std::vector< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* >* >& matches)
+    size_t GetCollided(std::vector<UINT_BAND_HASH_TYPE>::iterator bandHashes, std::vector< BucketHashPointerList* >& matches)
     {
         size_t totalPotentialCandidates = 0;
         for (uint32_t b = 0; b < bands; b++, bandHashes++)
@@ -373,18 +377,32 @@ public:
         return totalPotentialCandidates;
     }
 
-    size_t GetCollidedSet(std::vector<UINT_BAND_HASH_TYPE>::iterator bandHashes, std::unordered_set< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* >& matches)
+    std::unordered_map< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>*, uint32_t > matches;
+    size_t GetCollidedSet(std::vector<UINT_BAND_HASH_TYPE>::iterator bandHashes, std::list< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>* >& outMatches)
     {
+        matches.clear();
         for (uint32_t b = 0; b < bands; b++, bandHashes++)
         {
             auto matched = GetCollided(b, *bandHashes);
             if (matched != nullptr)
             {
-                matches.insert(matched->begin(), matched->end());
+                for (auto item : *matched)
+                {
+                    auto it = matches.find(item);
+                    if (it == matches.end() && b <= (uint32_t)(float)bands * 0.70)
+                        matches.insert(std::pair< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>*, uint32_t>({ item, 1 }));
+                    else if(it != matches.end())
+                        (*it).second++;
+                    //matches.insert(matched->begin(), matched->end());
+                }
             }
         }
-
-        return matches.size();
+        for (auto it : matches)
+        {
+            if ((it).second >= (uint32_t)(float)bands * 0.70)
+                outMatches.push_back(it.first);
+        }
+        return outMatches.size();
     }
 
     BucketHashPointerList* GetCollided(size_t bucketNum, UINT_BAND_HASH_TYPE bandHash)
