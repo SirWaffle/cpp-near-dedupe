@@ -146,6 +146,14 @@ public:
             comparerThread = makeComparerThread(comparerThreadFuture, lshType, magicTemplate);
             numBuckets = UINT64_MAX;
         }
+        else if (lshMethod == "hpb32")
+        {
+            typename LSHBandHashMap<HASH_TYPE, uint32_t, NUM_HASHES>::LSH_TYPE_ENUM lshType;
+            lshType = LSHBandHashMap<HASH_TYPE, uint32_t, NUM_HASHES>::ONLY_HASH_MAP;
+            uint32_t magicTemplate = 0;
+            comparerThread = makeComparerThread(comparerThreadFuture, lshType, magicTemplate);
+            numBuckets = UINT32_MAX;
+        }
         else
         {
             std::string str = "invalid lsh method";
@@ -356,14 +364,14 @@ int main(int argc, const char** argv)
     bool noFileOut = false;
     opt = app.add_option("-q,--noFileOut", noFileOut, "dont write out deduped files, useful for testing");
 
-    uint32_t numBands = 64;
+    uint32_t numBands = 32;
     opt = app.add_option("-l,--bands", numBands, "LSH bands ( numMinhashKeys (default 256) must be divisible by numBands evenly )");
 
     uint64_t numBuckets = UINT32_MAX;
     opt = app.add_option("-m,--buckets", numBuckets, "LSH buckets - number of buckets used inside LSH. larger = more memory)");
 
     std::string lshMethod = "rbs32";
-    opt = app.add_option("--lsh", lshMethod, "rbs32 / rbs64: random bit sampling with 32 or 64 bit key, hpb64: hash map entry per bucket with 64 bit key");
+    opt = app.add_option("--lsh", lshMethod, "rbs32 / rbs64: random bit sampling with 32 or 64 bit key, hpb64 / hpb32: hash map entry per bucket with 64 bit key");
 
     for (char& c : lshMethod)
         c = ::tolower(c);
