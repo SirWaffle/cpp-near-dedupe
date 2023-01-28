@@ -366,7 +366,7 @@ public:
         size_t totalPotentialCandidates = 0;
         for (uint32_t b = 0; b < bands; b++, bandHashes++)
         {
-            auto matched = GetCollided(b, *bandHashes);
+            auto matched = GetCollided_internal(b, *bandHashes);
             if (matched != nullptr)
             {
                 totalPotentialCandidates += matched->size();
@@ -383,29 +383,30 @@ public:
         matches.clear();
         for (uint32_t b = 0; b < bands; b++, bandHashes++)
         {
-            auto matched = GetCollided(b, *bandHashes);
+            auto matched = GetCollided_internal(b, *bandHashes);
             if (matched != nullptr)
             {
                 for (auto item : *matched)
                 {
                     auto it = matches.find(item);
-                    if (it == matches.end() && b <= (uint32_t)(float)bands * 0.70)
+                    if (it == matches.end() )
                         matches.insert(std::pair< HashBlockEntry<UINT_HASH_TYPE, MAX_HASH_LEN>*, uint32_t>({ item, 1 }));
-                    else if(it != matches.end())
+                    else if (it != matches.end())
+                    {
                         (*it).second++;
-                    //matches.insert(matched->begin(), matched->end());
+                        if ((*it).second == 4)
+                        {
+                            outMatches.push_back((*it).first);
+                        }
+                    }
                 }
             }
         }
-        for (auto it : matches)
-        {
-            if ((it).second >= (uint32_t)(float)bands * 0.70)
-                outMatches.push_back(it.first);
-        }
-        return outMatches.size();
+
+        return matches.size();
     }
 
-    BucketHashPointerList* GetCollided(size_t bucketNum, UINT_BAND_HASH_TYPE bandHash)
+    BucketHashPointerList* GetCollided_internal(size_t bucketNum, UINT_BAND_HASH_TYPE bandHash)
     {
         auto it = hashMaps[bucketNum].find(bandHash);
         if (it == hashMaps[bucketNum].end())

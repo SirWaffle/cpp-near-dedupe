@@ -145,16 +145,19 @@
     <ClInclude Include="CLI11.hpp" />
     <ClInclude Include="ComparerThread.h" />
     <ClInclude Include="ComparerThreadBruteForce.h" />
+    <ClInclude Include="CompareStrategies.h" />
     <ClInclude Include="DupeResolverThread.h" />
-    <ClInclude Include="HasherThread.h" />
+    <ClInclude Include="MinHasherThread.h" />
     <ClInclude Include="Hashing.h" />
     <ClInclude Include="HashTable.h" />
     <ClInclude Include="isalphanum.h" />
     <ClInclude Include="Jaccard.h" />
     <ClInclude Include="LockableQueue.h" />
+    <ClInclude Include="LongRunningWorkerThread.h" />
     <ClInclude Include="LSHBandHashMap.h" />
     <ClInclude Include="Shingler32.hpp" />
     <ClInclude Include="Shingler64.hpp" />
+    <ClInclude Include="SplitList.h" />
     <ClInclude Include="ThreadPool.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "HasherThread.h"
+#include "MinHasherThread.h"
 #include "Hashing.h"
 #include "LockableQueue.h"
 #include "Jaccard.h"

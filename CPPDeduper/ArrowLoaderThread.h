@@ -1,5 +1,7 @@
 #pragma once
 
+#include "LongRunningWorkerThread.h"
+
 #include "LockableQueue.h"
 
 #include "arrow/api.h"
@@ -16,7 +18,7 @@
 #include <chrono>
 #include <iostream>
 
-#define LOAD_TEST true
+#define LOAD_TEST false
 
 #if LOAD_TEST
 #include <random>
@@ -60,7 +62,10 @@ struct ArrowLoaderThreadOutputData
 };
 
 
-class ArrowLoaderThread
+#define IN_TYPE std::string
+#define OUT_TYPE ArrowLoaderThreadOutputData*
+
+class ArrowLoaderThread: public LongRunningWorkerThread<IN_TYPE, OUT_TYPE >
 {
 protected:
     uint32_t fileIndex = 0;
@@ -69,13 +74,20 @@ protected:
 
     uint32_t maxLoadedRecordsQueued;
 
-    LockableQueue< ArrowLoaderThreadOutputData* > batchQueue;
+    LockableQueue< OUT_TYPE > batchQueue;
 
     const size_t pushWorkQueueToOutputSize = 200;
 
+    std::vector<std::string> paths_to_file;
+    std::string dataColumnName;
+
 public:
-    ArrowLoaderThread(uint32_t _maxLoadedRecordsQueued)
-        :maxLoadedRecordsQueued(_maxLoadedRecordsQueued)
+    ArrowLoaderThread(BS::thread_pool* _threadPool, uint32_t _workChunkSize, 
+                    uint32_t _maxLoadedRecordsQueued, std::vector<std::string>& _paths_to_file, std::string _dataColumnName)
+        :LongRunningWorkerThread( _threadPool, nullptr, nullptr, _workChunkSize),
+        maxLoadedRecordsQueued(_maxLoadedRecordsQueued),
+        paths_to_file(_paths_to_file),
+        dataColumnName(_dataColumnName)
     {
     }
 
@@ -96,13 +108,12 @@ public:
         return totaldocs;
     }
 
-    LockableQueue< ArrowLoaderThreadOutputData* >* GetOutputQueuePtr()
+    void Run() override
     {
-        return &batchQueue;
+        DoWork(nullptr, nullptr);
     }
 
-
-    void EnterProcFunc(std::vector<std::string> paths_to_file, std::string dataColumnName)
+    virtual bool DoWork(std::queue< IN_TYPE >* workQueue, std::queue< OUT_TYPE >* workOutQueue) final
     {
         for (fileIndex = 0; fileIndex < paths_to_file.size(); ++fileIndex)
         {
@@ -111,6 +122,8 @@ public:
             std::cout << "File: " << (paths_to_file.size() - fileIndex) << " -> Streaming from: " << path_to_file << std::endl;
             arrow::Status status = StreamArrowDataset(path_to_file, fileIndex, maxLoadedRecordsQueued, dataColumnName);
         }
+
+        return true; 
     }
 
 protected:
@@ -196,7 +209,7 @@ protected:
                                 if (outWorkQueue.size() >= pushWorkQueueToOutputSize)
                                 {
                                     //lock and push to outputQueue
-                                    batchQueue.push_queue(&outWorkQueue);
+                                    outQueue->push_queue(&outWorkQueue);
                                 }
                             }
                         }
@@ -215,7 +228,7 @@ protected:
 
         //lock queue and push to outqueue with whatever remains
         if(outWorkQueue.size() > 0)
-            batchQueue.push_queue(&outWorkQueue);
+            outQueue->push_queue(&outWorkQueue);
 
         arrow::Status status = ipc_reader->Close();
         status = input->Close();

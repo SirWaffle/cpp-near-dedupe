@@ -7,10 +7,12 @@
 #include <queue>
 #include <iostream>
 
+#include "LongRunningWorkerThread.h"
+
 #include "DupeResolverThread.h"
 #include "ComparerThread.h"
 #include "ComparerThreadBruteForce.h"
-#include "HasherThread.h"
+#include "MinHasherThread.h"
 #include "ArrowLoaderThread.h"
 #include "LockableQueue.h"
 #include "ThreadPool.h"
@@ -87,72 +89,47 @@ public:
         uint32_t numThreads = threadPool.get_thread_count();
 
         //reader thread
-        ArrowLoaderThread* arrowLoaderThread = new ArrowLoaderThread(maxRecordsLoaded);
-        std::future<void> arrowLoaderThreadFuture = threadPool.submit(&ArrowLoaderThread::EnterProcFunc, arrowLoaderThread, fileNamesVector, dataColumnName);
+        ArrowLoaderThread* arrowLoaderThread = new ArrowLoaderThread(&threadPool, 0u, (uint32_t)maxRecordsLoaded, fileNamesVector, dataColumnName);
+
+        std::future<void> arrowLoaderThreadFuture = threadPool.submit(&ArrowLoaderThread::Run, arrowLoaderThread);
 
         //hasher threads
         LockableQueue< HasherThreadOutputData<HASH_TYPE>* > hashedDataQueue;
-        std::vector< HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>* > hasherThreads;
+        std::vector< MinHasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>* > hasherThreads;
         BS::multi_future<void> hasherThreadFutures;
 
         for (int i = 0; i < numHasherThreads; ++i)
         {
-            auto hasherThread = new HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>(&hashedDataQueue, 1024);
+            auto hasherThread = new MinHasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>(&threadPool, arrowLoaderThread->GetOutputQueuePtr(), &hashedDataQueue, 1024);
             hasherThreads.push_back(hasherThread);
 
-            hasherThreadFutures.push_back(threadPool.submit(&HasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>::EnterProcFunc, hasherThread, arrowLoaderThread->GetOutputQueuePtr()));
+            hasherThreadFutures.push_back(threadPool.submit(&MinHasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>::Run, hasherThread));
         }
 
 
 
-        //comparer
-        //template magic stuff until i figure out a better way
+       
+        ICompareStrat<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE>* compareStrategy;
 
-        auto makeComparerThread = [&]<typename LSH_KEY_TYPE>(std::future<void>& comparerThreadFuture, auto lshType, LSH_KEY_TYPE&) {
-            // do something
-            ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE, LSH_KEY_TYPE>* comparerThread =
-                new ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE, LSH_KEY_TYPE>(true, 2048, &threadPool, expectedDocs, numBands, numBuckets, lshType, std::max(1U, numThreads - baseThreads));
-
-            //for binary 'dupe or not', we dont need to score, so use the threshval for early out as well
-            //hashers have a static queue, one shared across them all
-            comparerThreadFuture = threadPool.submit(&ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE, LSH_KEY_TYPE>::EnterProcFunc,
-                comparerThread, &hashedDataQueue, /*JACCARD_EARLY_OUT*/ matchThresh, matchThresh);
-
-            return comparerThread;
-        };
-
-        std::future<void> comparerThreadFuture;
-        IComparerThread* comparerThread = nullptr;
-
+//#define COMPARE_STRAT AllBucketsCompareStrat
+#define COMPARE_STRAT SetReduceCompareStrat
         if (lshMethod == "rbs32")
         {
-            typename LSHBandHashMap<HASH_TYPE, uint32_t, NUM_HASHES>::LSH_TYPE_ENUM lshType;
-            lshType = LSHBandHashMap<HASH_TYPE, uint32_t, NUM_HASHES>::RANDOM_BIT;
-            uint32_t magicTemplate = 0;
-            comparerThread = makeComparerThread(comparerThreadFuture, lshType, magicTemplate);
+            compareStrategy = new COMPARE_STRAT<HASH_TYPE, NUM_HASHES, uint32_t, HASH_BLOCK_SIZE>(&threadPool, numBands, numBuckets, LSHBandHashMap<HASH_TYPE, uint32_t, NUM_HASHES>::RANDOM_BIT, expectedDocs);
         }
         else if (lshMethod == "rbs64")
         {
-            typename LSHBandHashMap<HASH_TYPE, uint64_t, NUM_HASHES>::LSH_TYPE_ENUM lshType;
-            lshType = LSHBandHashMap<HASH_TYPE, uint64_t, NUM_HASHES>::RANDOM_BIT;
-            uint64_t magicTemplate = 0;
-            comparerThread = makeComparerThread(comparerThreadFuture, lshType, magicTemplate);
+            compareStrategy = new COMPARE_STRAT<HASH_TYPE, NUM_HASHES, uint64_t, HASH_BLOCK_SIZE>(&threadPool, numBands, numBuckets, LSHBandHashMap<HASH_TYPE, uint64_t, NUM_HASHES>::RANDOM_BIT, expectedDocs);
         }
         else if(lshMethod == "hpb64")
         {
-            typename LSHBandHashMap<HASH_TYPE, uint64_t, NUM_HASHES>::LSH_TYPE_ENUM lshType;
-            lshType = LSHBandHashMap<HASH_TYPE, uint64_t, NUM_HASHES>::ONLY_HASH_MAP;
-            uint64_t magicTemplate = 0;
-            comparerThread = makeComparerThread(comparerThreadFuture, lshType, magicTemplate);
             numBuckets = UINT64_MAX;
+            compareStrategy = new COMPARE_STRAT<HASH_TYPE, NUM_HASHES, uint64_t, HASH_BLOCK_SIZE>(&threadPool, numBands, numBuckets, LSHBandHashMap<HASH_TYPE, uint64_t, NUM_HASHES>::ONLY_HASH_MAP, expectedDocs);
         }
         else if (lshMethod == "hpb32")
         {
-            typename LSHBandHashMap<HASH_TYPE, uint32_t, NUM_HASHES>::LSH_TYPE_ENUM lshType;
-            lshType = LSHBandHashMap<HASH_TYPE, uint32_t, NUM_HASHES>::ONLY_HASH_MAP;
-            uint32_t magicTemplate = 0;
-            comparerThread = makeComparerThread(comparerThreadFuture, lshType, magicTemplate);
             numBuckets = UINT32_MAX;
+            compareStrategy = new COMPARE_STRAT<HASH_TYPE, NUM_HASHES, uint64_t, HASH_BLOCK_SIZE>(&threadPool, numBands, numBuckets, LSHBandHashMap<HASH_TYPE, uint64_t, NUM_HASHES>::ONLY_HASH_MAP, expectedDocs);
         }
         else
         {
@@ -160,6 +137,16 @@ public:
             std::cout << str << std::endl;
             throw std::runtime_error(str);
         }
+
+        // do something
+        ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE>* comparerThread =
+            new ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE>(&threadPool, &hashedDataQueue, nullptr, 2048,
+                                                                        compareStrategy, matchThresh, matchThresh, std::max(1U, numThreads - baseThreads));
+
+        //for binary 'dupe or not', we dont need to score, so use the threshval for early out as well
+        //hashers have a static queue, one shared across them all
+        std::future<void> comparerThreadFuture = threadPool.submit(&ComparerThread<HASH_TYPE, NUM_HASHES, HASH_BLOCK_SIZE>::Run, comparerThread);
+
 
         //and as the comparer spits out the dupes, we can start removing them from the datasets...
         DupeResolverThread* dupeResolverThread = new DupeResolverThread(basePath, outPath, 4096, false, noFileOut);
