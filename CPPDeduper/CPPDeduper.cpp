@@ -7,7 +7,7 @@
 #include <queue>
 #include <iostream>
 
-#include "LongRunningWorkerThread.h"
+#include "PipelineThread.h"
 
 #include "DupeResolverThread.h"
 #include "ComparerThread.h"
@@ -18,11 +18,25 @@
 #include "ThreadPool.h"
 #include "CLI11.hpp"
 
+#include "CoalesceByFileThread.h"
+#include "WriteMinhashArrowFileThread.h"
+
+
 
 static constexpr int HASH_LENGTH_SHINGLES = 5; //words used per hash
-//static constexpr int NUM_HASHES = 256; //number of hashes for comparison
-
 const uint64_t expectedDocs = 6000000000; //TODO: make this a parameter
+
+
+
+//forward decl
+int ParseArguments(int argc, const char** argv);
+
+int main(int argc, const char** argv)
+{
+    return ParseArguments(argc, argv);
+}
+
+
 
 //logic for running a pass of everything
 
@@ -47,7 +61,7 @@ public:
 
         //quick and sloppy lookups of filenames, so we dont have to store in each unit of data
         //saves # of loaded docs * string length of filepaths woth of memory
-        static std::vector<std::string> fileNamesVector;
+        static std::vector<FileInfo*> fileNamesVector;
 
         for (auto itEntry = std::filesystem::recursive_directory_iterator(basePath);
             itEntry != std::filesystem::recursive_directory_iterator();
@@ -59,7 +73,8 @@ public:
             if (ext == extension)
             {
                 std::cout << "adding found file:  " << itEntry->path().string() << '\n';
-                fileNamesVector.push_back(itEntry->path().string());
+                FileInfo* fi = new FileInfo(itEntry->path().string(), (uint32_t)fileNamesVector.size());                
+                fileNamesVector.push_back(std::move(fi));
             }
         }
 
@@ -71,6 +86,14 @@ public:
         else
         {
             std::cout << "Found " + fileNamesVector.size() << " files to parse...";
+        }
+
+        //put files into a lockable queue so we can have multiple fileloaders
+        LockableQueue<FileInfo*> inputFileQueue;
+        int fileId = 0;
+        for (FileInfo* fi : fileNamesVector)
+        {
+            inputFileQueue.push(std::move(fi));
         }
 
 
@@ -89,7 +112,7 @@ public:
         uint32_t numThreads = threadPool.get_thread_count();
 
         //reader thread
-        ArrowLoaderThread* arrowLoaderThread = new ArrowLoaderThread(&threadPool, 0u, (uint32_t)maxRecordsLoaded, fileNamesVector, dataColumnName);
+        ArrowLoaderThread* arrowLoaderThread = new ArrowLoaderThread(&threadPool, 1u, (uint32_t)maxRecordsLoaded, &inputFileQueue, dataColumnName);
 
         std::future<void> arrowLoaderThreadFuture = threadPool.submit(&ArrowLoaderThread::Run, arrowLoaderThread);
 
@@ -273,6 +296,9 @@ public:
         delete comparerThread;
         delete dupeResolverThread;
 
+        for (FileInfo* fi : fileNamesVector)
+            delete fi;
+
         return 0;
     }
 };
@@ -304,10 +330,153 @@ public:
 
 
 
+
+
+//minhash only pass
+template<typename HASH_TYPE, int NUM_HASHES>
+class MinhashOnlyRunner {
+public:
+    MinhashOnlyRunner()
+    {}
+
+    int Run(std::string inputPath, std::string outPath, std::string dataColumnName, std::string extension,
+            int numHasherThreads, int maxRecordsLoaded, bool noFileOut)
+    {
+        std::filesystem::path basePath = inputPath;
+
+
+        std::cout << "Running with params: " << basePath << ", " << extension << ", " << dataColumnName << ", " << outPath << std::endl;
+
+        std::cout << "Scanning for " << extension << " files in " << basePath;
+
+        //quick and sloppy lookups of filenames, so we dont have to store in each unit of data
+        //saves # of loaded docs * string length of filepaths woth of memory
+        static std::vector<FileInfo*> fileNamesVector;
+
+        for (auto itEntry = std::filesystem::recursive_directory_iterator(basePath);
+            itEntry != std::filesystem::recursive_directory_iterator();
+            ++itEntry)
+        {
+            const auto filenameStr = itEntry->path().filename().string();
+            std::string ext = std::filesystem::path(filenameStr).extension().string();
+
+            if (ext == extension)
+            {
+                std::cout << "adding found file:  " << itEntry->path().string() << '\n';
+                FileInfo* fi = new FileInfo(itEntry->path().string(), (uint32_t)fileNamesVector.size());
+                fileNamesVector.push_back(std::move(fi));
+            }
+        }
+
+        if (fileNamesVector.size() == 0)
+        {
+            std::cout << "Failed to locate any datasets to parse, exiting";
+            return 1;
+        }
+        else
+        {
+            std::cout << "Found " + fileNamesVector.size() << " files to parse...";
+        }
+
+        //put files into a lockable queue so we can have multiple fileloaders
+        LockableQueue<FileInfo*> inputFileQueue;
+        int fileId = 0;
+        for (FileInfo* fi : fileNamesVector)
+        {
+            inputFileQueue.push(std::move(fi));
+        }
+
+
+        //track how long we take...
+        auto startTime = std::chrono::high_resolution_clock::now();
+
+        //======
+        //start threads
+        //======
+
+        //minimum threads...
+        // //TODO: change to accept number of IO in and out threads, the rest as hashers
+        //1 loader thread, x hasher threads, 1 coallescing thread, 1 output thread
+        uint32_t baseThreads = 3 + numHasherThreads;
+        BS::thread_pool threadPool(baseThreads, 0);
+        uint32_t numThreads = threadPool.get_thread_count();
+
+        //reader thread
+        ArrowLoaderThread* arrowLoaderThread = new ArrowLoaderThread(&threadPool, 1u, (uint32_t)maxRecordsLoaded, &inputFileQueue, dataColumnName);
+
+        std::future<void> arrowLoaderThreadFuture = threadPool.submit(&ArrowLoaderThread::Run, arrowLoaderThread);
+
+        //hasher threads
+        LockableQueue< HasherThreadOutputData<HASH_TYPE>* > hashedDataQueue;
+        std::vector< MinHasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>* > hasherThreads;
+        BS::multi_future<void> hasherThreadFutures;
+
+        for (int i = 0; i < numHasherThreads; ++i)
+        {
+            auto hasherThread = new MinHasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>(&threadPool, arrowLoaderThread->GetOutputQueuePtr(), &hashedDataQueue, 1024);
+            hasherThreads.push_back(hasherThread);
+
+            hasherThreadFutures.push_back(threadPool.submit(&MinHasherThread<HASH_LENGTH_SHINGLES, NUM_HASHES, HASH_TYPE>::Run, hasherThread));
+        }
+
+
+        CoalesceByFileThread<HASH_TYPE> coalesceThread(&threadPool, &hashedDataQueue, 1024, &fileNamesVector);
+        std::future<void> coalesceThreadFuture = threadPool.submit(&CoalesceByFileThread<HASH_TYPE>::Run, coalesceThread);
+
+        WriteMinhashArrowFileThread<HASH_TYPE> ioOutThread(&threadPool, coalesceThread.GetOutputQueuePtr(), 1, &fileNamesVector, basePath, outPath);
+
+        //wait for tasks to complete
+        //ugly state thing until i sort out a better way
+        int logEvery = 10;
+        int curLoop = 0;
+
+        uint64_t lastCompareCount = 0;
+        auto lastStatusReport = std::chrono::high_resolution_clock::now();
+
+        while (true)
+        {
+            curLoop++;
+            if (curLoop >= logEvery)
+            {
+                curLoop = 0;
+                auto curTime = std::chrono::high_resolution_clock::now();
+                auto totalElapsedTime = duration_cast<std::chrono::seconds>(curTime - startTime);
+                auto elapsedSincelastStatus = duration_cast<std::chrono::milliseconds>(curTime - lastStatusReport);
+
+                std::cout << std::endl;
+                std::cout << "[ " << totalElapsedTime.count() << "s ] Stats:";
+
+
+                std::cout << "   [ ]Docs Loading: " << arrowLoaderThread->GetTotalDocs();
+                std::cout << "   [" << numHasherThreads << "]Pending Hash: " << arrowLoaderThread->GetOutputQueuePtr()->Length();
+            }
+        }
+
+        auto stopTime = std::chrono::high_resolution_clock::now();
+
+        //aaaand done
+        auto duration = duration_cast<std::chrono::seconds>(stopTime - startTime);
+        std::cout << "Finished in " << (uint64_t)(duration.count()) << "s" << std::endl;
+        std::cout << "Total batches: " << arrowLoaderThread->GetTotalBatches() << " and total docs: " << arrowLoaderThread->GetTotalDocs() << std::endl;
+
+
+        //clean up...
+        threadPool.reset(0);
+        delete arrowLoaderThread;
+
+        for (FileInfo* fi : fileNamesVector)
+            delete fi;
+
+        return 0;
+    }
+};
+
+
+
 //==========
 // main
 //==========
-int main(int argc, const char** argv)
+int ParseArguments(int argc, const char** argv)
 {
     //lets try CLI11
     CLI::App app("SquishBrains CPPDeduper");
@@ -360,6 +529,9 @@ int main(int argc, const char** argv)
     std::string lshMethod = "rbs32";
     opt = app.add_option("--lsh", lshMethod, "rbs32 / rbs64: random bit sampling with 32 or 64 bit key, hpb64 / hpb32: hash map entry per bucket with 64 bit key");
 
+    bool writeMinhashOnly = false;
+    opt = app.add_option("--writeMinhashesOnly", writeMinhashOnly, "load, minhash, and write results to arrow files");
+
     for (char& c : lshMethod)
         c = ::tolower(c);
 
@@ -369,6 +541,12 @@ int main(int argc, const char** argv)
     catch (const CLI::ParseError& e) {
         std::cout << app.help("", CLI::AppFormatMode::All);
         return app.exit(e);
+    }
+    
+    if (writeMinhashOnly == true)
+    {
+        MinhashOnlyRunner<uint64_t, 256> runner;
+        return runner.Run(inputPath, outPath, dataColumnName, extension, numHasherThreads, maxRecordsLoaded, noFileOut);
     }
     
     if (numHashes == 4)
@@ -384,4 +562,5 @@ int main(int argc, const char** argv)
     if(numHashes == 256)
         DO_RUN_AND_RETURN_IF_WITH_NUM_HASHES(hashSize, hashBlockSize, 256);
 
+    return 0;
 }

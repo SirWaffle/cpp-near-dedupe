@@ -1,6 +1,6 @@
 #pragma once
 
-#include "LongRunningWorkerThread.h"
+#include "PipelineThread.h"
 #include "LockableQueue.h"
 #include "ArrowLoaderThread.h"
 #include "Hashing.h"
@@ -39,11 +39,11 @@ struct HasherThreadOutputData
 
 
 template<int HASH_LEN_SHINGLES, int NUM_HASHES, typename UINT_HASH_TYPE>
-class MinHasherThread : public LongRunningWorkerThread<IN_TYPE, OUT_TYPE >
+class MinHasherThread : public PipelineThread<IN_TYPE, OUT_TYPE >
 {
 public:
     MinHasherThread(BS::thread_pool* _threadPool, LockableQueue< IN_TYPE >* _inQueue, LockableQueue< OUT_TYPE >* _outQueue, uint32_t _workChunkSize)
-        :LongRunningWorkerThread<IN_TYPE, OUT_TYPE >(_threadPool, _inQueue, _outQueue, _workChunkSize)
+        :PipelineThread<IN_TYPE, OUT_TYPE >(_threadPool, _inQueue, _outQueue, _workChunkSize)
     {
     }
 

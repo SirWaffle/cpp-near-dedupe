@@ -143,6 +143,7 @@
     <ClInclude Include="ArrowLoaderThread.h" />
     <ClInclude Include="ChunkList.h" />
     <ClInclude Include="CLI11.hpp" />
+    <ClInclude Include="CoalesceByFileThread.h" />
     <ClInclude Include="ComparerThread.h" />
     <ClInclude Include="ComparerThreadBruteForce.h" />
     <ClInclude Include="CompareStrategies.h" />
@@ -153,12 +154,13 @@
     <ClInclude Include="isalphanum.h" />
     <ClInclude Include="Jaccard.h" />
     <ClInclude Include="LockableQueue.h" />
-    <ClInclude Include="LongRunningWorkerThread.h" />
+    <ClInclude Include="PipelineThread.h" />
     <ClInclude Include="LSHBandHashMap.h" />
     <ClInclude Include="Shingler32.hpp" />
     <ClInclude Include="Shingler64.hpp" />
     <ClInclude Include="SplitList.h" />
     <ClInclude Include="ThreadPool.h" />
+    <ClInclude Include="WriteMinhashArrowFileThread.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

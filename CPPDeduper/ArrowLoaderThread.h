@@ -1,6 +1,6 @@
 #pragma once
 
-#include "LongRunningWorkerThread.h"
+#include "PipelineThread.h"
 
 #include "LockableQueue.h"
 
@@ -61,11 +61,25 @@ struct ArrowLoaderThreadOutputData
 #endif
 };
 
+struct FileInfo
+{
+    std::string filePath;
+    uint32_t fileId = -1;
+    std::atomic<bool> finishedLoad = 0;
+    std::atomic<int64_t> numRowsLoaded = 0;
 
-#define IN_TYPE std::string
+    FileInfo(std::string path, uint32_t id)
+        :filePath(path),
+        fileId(id)
+    {       
+    }
+};
+
+
+#define IN_TYPE FileInfo*
 #define OUT_TYPE ArrowLoaderThreadOutputData*
 
-class ArrowLoaderThread: public LongRunningWorkerThread<IN_TYPE, OUT_TYPE >
+class ArrowLoaderThread: public PipelineThread<IN_TYPE, OUT_TYPE >
 {
 protected:
     uint32_t fileIndex = 0;
@@ -78,24 +92,15 @@ protected:
 
     const size_t pushWorkQueueToOutputSize = 200;
 
-    std::vector<std::string> paths_to_file;
     std::string dataColumnName;
 
 public:
     ArrowLoaderThread(BS::thread_pool* _threadPool, uint32_t _workChunkSize, 
-                    uint32_t _maxLoadedRecordsQueued, std::vector<std::string>& _paths_to_file, std::string _dataColumnName)
-        :LongRunningWorkerThread( _threadPool, nullptr, nullptr, _workChunkSize),
+                    uint32_t _maxLoadedRecordsQueued, LockableQueue< IN_TYPE >* _inQueue, std::string _dataColumnName)
+        :PipelineThread( _threadPool, _inQueue, nullptr, _workChunkSize),
         maxLoadedRecordsQueued(_maxLoadedRecordsQueued),
-        paths_to_file(_paths_to_file),
         dataColumnName(_dataColumnName)
     {
-    }
-
-    //returns the index of the file vector of the file we are processing
-    //this is used by the write out thread, to know which files are safe to start operating on
-    int GetCurrentlyProcessingFileID()
-    {
-        return fileIndex;
     }
 
     uint32_t GetTotalBatches()
@@ -108,26 +113,25 @@ public:
         return totaldocs;
     }
 
-    void Run() override
-    {
-        DoWork(nullptr, nullptr);
-    }
-
     virtual bool DoWork(std::queue< IN_TYPE >* workQueue, std::queue< OUT_TYPE >* workOutQueue) final
     {
-        for (fileIndex = 0; fileIndex < paths_to_file.size(); ++fileIndex)
-        {
-            std::string& path_to_file = paths_to_file[fileIndex];
+        FileInfo* fi = workQueue->front();
+        workQueue->pop();
+        std::string& path_to_file = fi->filePath;
 
-            std::cout << "File: " << (paths_to_file.size() - fileIndex) << " -> Streaming from: " << path_to_file << std::endl;
-            arrow::Status status = StreamArrowDataset(path_to_file, fileIndex, maxLoadedRecordsQueued, dataColumnName);
-        }
+        uint64_t rowsLoaded = 0;
+
+        std::cout << "File: " << fi->fileId << " -> Streaming from: " << path_to_file << std::endl;
+        arrow::Status status = StreamArrowDataset(path_to_file, fi->fileId, maxLoadedRecordsQueued, dataColumnName, rowsLoaded);
+
+        fi->finishedLoad.store(true);
+        fi->numRowsLoaded.store(rowsLoaded);
 
         return true; 
     }
 
 protected:
-    arrow::Status StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, int maxCapacity, std::string dataColumnName)
+    arrow::Status StreamArrowDataset(std::string path_to_file, uint32_t fileIndex, int maxCapacity, std::string dataColumnName, uint64_t& rowsLoaded)
     {
         std::queue< ArrowLoaderThreadOutputData* > outWorkQueue;
 
@@ -225,6 +229,8 @@ protected:
                 }
             }
         }
+
+        rowsLoaded = lineNumOffset;
 
         //lock queue and push to outqueue with whatever remains
         if(outWorkQueue.size() > 0)

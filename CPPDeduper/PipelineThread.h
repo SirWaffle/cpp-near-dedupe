@@ -10,7 +10,7 @@
 
 
 template<typename IN_TYPE, typename OUT_TYPE>
-class LongRunningWorkerThread
+class PipelineThread
 {
 public:
 	std::stop_source m_stop;
@@ -27,7 +27,7 @@ public:
 	std::queue< IN_TYPE > workQueue;
 
 
-	LongRunningWorkerThread(BS::thread_pool* _threadPool, LockableQueue< IN_TYPE >* _inQueue, LockableQueue< OUT_TYPE >* _outQueue,  uint32_t _workChunkSize)
+	PipelineThread(BS::thread_pool* _threadPool, LockableQueue< IN_TYPE >* _inQueue, LockableQueue< OUT_TYPE >* _outQueue,  uint32_t _workChunkSize)
 		:threadPool(_threadPool),
         workChunkSize(_workChunkSize),
 		inQueue(_inQueue),

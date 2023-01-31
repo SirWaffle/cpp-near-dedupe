@@ -91,7 +91,7 @@ public:
     }
 
     void EnterProcFunc(LockableQueue< CompareThreadDupeItem* >* duplicates, 
-        std::vector<std::string>* fileNamesVector)
+        std::vector<FileInfo*>* fileNamesVector)
     {
 
         std::queue<CompareThreadDupeItem* > workQueue;
@@ -137,7 +137,7 @@ public:
         //TODO: perf improvement
         for (uint32_t sourceFileInd = 0; sourceFileInd < fileNamesVector->size(); ++sourceFileInd)
         {
-            std::string fname = (*fileNamesVector)[sourceFileInd];
+            std::string fname = (*fileNamesVector)[sourceFileInd]->filePath;
 
             //create source and dest path for datasets
             //lets use the baseIn, baseOut, and full filepath to mirror the initial datastructe and what not

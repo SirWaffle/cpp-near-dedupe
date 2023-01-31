@@ -1,6 +1,6 @@
 #pragma once
 
-#include "LongRunningWorkerThread.h"
+#include "PipelineThread.h"
 #include "MinHasherThread.h"
 #include "Hashing.h"
 #include "LockableQueue.h"
@@ -248,7 +248,7 @@ public:
 
 
 template<typename UINT_HASH_TYPE, uint32_t MAX_HASH_LEN, uint32_t BLOCK_SIZE >
-class ComparerThread: public IComparerThread, public LongRunningWorkerThread<IN_TYPE, OUT_TYPE >
+class ComparerThread: public IComparerThread, public PipelineThread<IN_TYPE, OUT_TYPE >
 {
 protected:
     bool m_throwOutDupes;
@@ -263,7 +263,7 @@ protected:
 public:
     ComparerThread(BS::thread_pool* _threadPool, LockableQueue< IN_TYPE >* _inQueue, LockableQueue< OUT_TYPE >* _outQueue, uint32_t _workChunkSize
         , ICompareStrat<UINT_HASH_TYPE, MAX_HASH_LEN, BLOCK_SIZE>* strat, double _earlyOut, double _dupeThreash, uint32_t maxThreadWorkers = 0)
-        : LongRunningWorkerThread<IN_TYPE, OUT_TYPE >(_threadPool, _inQueue, _outQueue, _workChunkSize),
+        : PipelineThread<IN_TYPE, OUT_TYPE >(_threadPool, _inQueue, _outQueue, _workChunkSize),
         m_throwOutDupes(true),
         maxThreadWorkers(maxThreadWorkers),
         comparedItems(0),
